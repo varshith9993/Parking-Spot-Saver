@@ -2,14 +2,30 @@ package com.example.devicewatch
 
 import android.app.Activity
 import android.content.Context
+import android.content.Intent
 import android.location.Location
+import android.net.Uri
+import android.provider.Settings
+import android.text.InputType
+import android.view.LayoutInflater
+import android.view.View
 import android.view.ViewGroup
 import android.widget.EditText
+import android.widget.FrameLayout
+import android.widget.ImageButton
 import android.widget.ImageView
+import android.widget.ProgressBar
+import android.widget.TextView
+import androidx.annotation.StringRes
+import androidx.core.content.ContextCompat
 import androidx.core.content.res.ResourcesCompat
+import com.example.devicewatch.location.DistanceCalculator
 import com.example.devicewatch.location.NativeGeocoder
+import com.example.devicewatch.model.ParkingPhotoItem
 import com.example.devicewatch.model.ParkingRecord
 import com.example.devicewatch.storage.ParkingPhotoManager
+import com.google.android.material.bottomsheet.BottomSheetDialog
+import com.google.android.material.button.MaterialButton
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import org.maplibre.android.camera.CameraUpdateFactory
 import org.maplibre.android.geometry.LatLng
@@ -88,7 +104,6 @@ internal object ParkingUiHelper {
                 locationComponent.forceLocationUpdate(initialLocation)
             }
         } catch (_: SecurityException) {
-            // Permission may have been revoked; ignore safely.
         }
     }
 
@@ -109,16 +124,26 @@ internal object ParkingUiHelper {
         record: ParkingRecord,
         animateCamera: Boolean = true
     ) {
+        showCoordinatesOnMap(map, styleLoaded, record.latitude, record.longitude, animateCamera)
+    }
+
+    fun showCoordinatesOnMap(
+        map: MapLibreMap,
+        styleLoaded: Boolean,
+        latitude: Double,
+        longitude: Double,
+        animateCamera: Boolean = true
+    ) {
         val style = map.style
         if (styleLoaded && style != null && style.isFullyLoaded) {
-            val point = Point.fromLngLat(record.longitude, record.latitude)
+            val point = Point.fromLngLat(longitude, latitude)
             style.getSourceAs<GeoJsonSource>(MARKER_SOURCE_ID)
                 ?.setGeoJson(FeatureCollection.fromFeature(Feature.fromGeometry(point)))
         }
         if (animateCamera) {
             map.animateCamera(
                 CameraUpdateFactory.newLatLngZoom(
-                    LatLng(record.latitude, record.longitude),
+                    LatLng(latitude, longitude),
                     MAP_DEFAULT_ZOOM
                 )
             )
@@ -141,27 +166,56 @@ internal object ParkingUiHelper {
         map?.animateCamera(CameraUpdateFactory.zoomOut())
     }
 
-    fun formatPhotoTimeText(context: Context, record: ParkingRecord): String {
+    fun applyBookmarkIcon(button: ImageButton, isSaved: Boolean) {
+        val ctx = button.context
+        if (isSaved) {
+            button.setImageResource(R.drawable.ic_bookmark_filled)
+            button.setColorFilter(ContextCompat.getColor(ctx, R.color.ps_primary))
+        } else {
+            button.setImageResource(R.drawable.ic_bookmark_outline)
+            button.setColorFilter(ContextCompat.getColor(ctx, R.color.ps_text_secondary))
+        }
+    }
+
+    fun formatPhotoTimeText(context: Context, photo: ParkingPhotoItem): String {
         val formatter = DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT)
         return when {
-            record.hasOriginalCaptureTimestamp() -> context.getString(
+            photo.hasOriginalCaptureTimestamp() -> context.getString(
                 R.string.photo_captured_at,
-                formatter.format(Date(record.originalCaptureTimestamp))
+                formatter.format(Date(photo.originalCaptureTimestamp))
             )
-            record.hasImportTimestamp() -> context.getString(
+            photo.hasImportTimestamp() -> context.getString(
                 R.string.photo_imported_at,
-                formatter.format(Date(record.importTimestamp))
+                formatter.format(Date(photo.importTimestamp))
             )
             else -> context.getString(R.string.photo_time_unavailable)
         }
     }
 
-    fun formatPhotoLocationText(context: Context, record: ParkingRecord): String {
-        return if (record.hasPhotoLocation()) {
+    fun formatPhotoLocationText(context: Context, photo: ParkingPhotoItem): String {
+        return if (photo.hasPhotoLocation()) {
             context.getString(
                 R.string.photo_gps_available,
-                NativeGeocoder.formatCoordinates(record.photoLatitude, record.photoLongitude)
+                NativeGeocoder.formatCoordinates(photo.photoLatitude, photo.photoLongitude)
             )
+        } else {
+            context.getString(R.string.photo_gps_unavailable)
+        }
+    }
+
+    fun formatPhotoTimeText(context: Context, record: ParkingRecord): String {
+        val first = record.photos.firstOrNull()
+        return if (first != null) {
+            formatPhotoTimeText(context, first)
+        } else {
+            context.getString(R.string.photo_time_unavailable)
+        }
+    }
+
+    fun formatPhotoLocationText(context: Context, record: ParkingRecord): String {
+        val first = record.photos.firstOrNull()
+        return if (first != null) {
+            formatPhotoLocationText(context, first)
         } else {
             context.getString(R.string.photo_gps_unavailable)
         }
@@ -188,22 +242,72 @@ internal object ParkingUiHelper {
         currentNote: String?,
         onSave: (String?) -> Unit
     ) {
-        val existingNote = currentNote.orEmpty()
+        showTextInputDialog(
+            context = context,
+            titleRes = R.string.edit_note,
+            hintRes = R.string.note_hint,
+            initialText = currentNote,
+            positiveRes = R.string.save,
+            negativeRes = R.string.cancel,
+            allowRemoveWhenNonEmpty = true,
+            onSave = onSave
+        )
+    }
+
+    fun showPlaceLabelDialog(
+        context: Context,
+        @StringRes titleRes: Int,
+        @StringRes hintRes: Int,
+        currentLabel: String?,
+        @StringRes negativeRes: Int,
+        allowRemove: Boolean,
+        onSave: (String?) -> Unit
+    ) {
+        showTextInputDialog(
+            context = context,
+            titleRes = titleRes,
+            hintRes = hintRes,
+            initialText = currentLabel,
+            positiveRes = R.string.save,
+            negativeRes = negativeRes,
+            allowRemoveWhenNonEmpty = allowRemove,
+            onSave = onSave
+        )
+    }
+
+    private fun showTextInputDialog(
+        context: Context,
+        @StringRes titleRes: Int,
+        @StringRes hintRes: Int,
+        initialText: String?,
+        @StringRes positiveRes: Int,
+        @StringRes negativeRes: Int,
+        allowRemoveWhenNonEmpty: Boolean,
+        onSave: (String?) -> Unit
+    ) {
+        val existing = initialText.orEmpty()
         val input = EditText(context).apply {
-            setHint(R.string.note_hint)
-            setText(existingNote)
-            setPadding(48, 32, 48, 32)
+            setHint(hintRes)
+            setText(existing)
+            setTextColor(ContextCompat.getColor(context, R.color.ps_text_primary))
+            setHintTextColor(ContextCompat.getColor(context, R.color.ps_text_secondary))
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+            setSelection(text?.length ?: 0)
+        }
+        val container = FrameLayout(context).apply {
+            setPadding(48, 20, 48, 8)
+            addView(input)
         }
         val builder = MaterialAlertDialogBuilder(context)
-            .setTitle(R.string.edit_note)
-            .setView(input)
-            .setNegativeButton(R.string.cancel, null)
-            .setPositiveButton(R.string.save) { _, _ ->
-                val note = input.text?.toString()?.trim().orEmpty()
-                onSave(note.ifEmpty { null })
+            .setTitle(titleRes)
+            .setView(container)
+            .setNegativeButton(negativeRes, null)
+            .setPositiveButton(positiveRes) { _, _ ->
+                val value = input.text?.toString()?.trim().orEmpty()
+                onSave(value.ifEmpty { null })
             }
-        if (existingNote.isNotBlank()) {
-            builder.setNeutralButton(R.string.remove_note) { _, _ ->
+        if (allowRemoveWhenNonEmpty && existing.isNotBlank()) {
+            builder.setNeutralButton(R.string.remove) { _, _ ->
                 onSave(null)
             }
         }
@@ -237,5 +341,138 @@ internal object ParkingUiHelper {
                 .setPositiveButton(R.string.close, null)
                 .show()
         }
+    }
+
+    sealed class RecordDistanceState {
+        object Idle : RecordDistanceState()
+        object Loading : RecordDistanceState()
+        data class Loaded(val awayText: String) : RecordDistanceState()
+        data class Error(val message: String) : RecordDistanceState()
+    }
+
+    fun formatDistanceAwayText(context: Context, distanceMeters: Float): String? {
+        if (distanceMeters < 0f || distanceMeters.isNaN() || distanceMeters.isInfinite()) {
+            return null
+        }
+        return context.getString(
+            R.string.distance_away_format,
+            DistanceCalculator.formatDistance(distanceMeters)
+        )
+    }
+
+    fun bindOnDemandDistanceRow(
+        state: RecordDistanceState,
+        progressBar: ProgressBar,
+        statusTextView: TextView,
+        actionButton: MaterialButton
+    ) {
+        val ctx = actionButton.context
+        when (state) {
+            is RecordDistanceState.Idle -> {
+                progressBar.visibility = View.GONE
+                statusTextView.visibility = View.GONE
+                statusTextView.text = ""
+                actionButton.isEnabled = true
+                actionButton.setText(R.string.show_distance)
+            }
+            is RecordDistanceState.Loading -> {
+                progressBar.visibility = View.VISIBLE
+                statusTextView.visibility = View.VISIBLE
+                statusTextView.setText(R.string.calculating_distance)
+                statusTextView.setTextColor(ContextCompat.getColor(ctx, R.color.ps_text_secondary))
+                actionButton.isEnabled = false
+                actionButton.setText(R.string.show_distance)
+            }
+            is RecordDistanceState.Loaded -> {
+                progressBar.visibility = View.GONE
+                statusTextView.visibility = View.VISIBLE
+                statusTextView.text = state.awayText
+                statusTextView.setTextColor(ContextCompat.getColor(ctx, R.color.ps_primary))
+                actionButton.isEnabled = true
+                actionButton.setText(R.string.refresh_distance)
+            }
+            is RecordDistanceState.Error -> {
+                progressBar.visibility = View.GONE
+                statusTextView.visibility = View.VISIBLE
+                statusTextView.text = state.message
+                statusTextView.setTextColor(ContextCompat.getColor(ctx, R.color.ps_error))
+                actionButton.isEnabled = true
+                actionButton.setText(R.string.show_distance)
+            }
+        }
+    }
+
+    fun showDistancePermissionDialog(
+        context: Context,
+        allowRetryRequest: Boolean,
+        onRetryPermission: () -> Unit,
+        onOpenSettings: () -> Unit
+    ) {
+        val builder = MaterialAlertDialogBuilder(context)
+            .setTitle(R.string.distance_permission_required_title)
+            .setMessage(R.string.distance_permission_required_message)
+            .setNegativeButton(R.string.cancel, null)
+        if (allowRetryRequest) {
+            builder.setPositiveButton(R.string.grant_permission) { _, _ -> onRetryPermission() }
+            builder.setNeutralButton(R.string.open_settings) { _, _ -> onOpenSettings() }
+        } else {
+            builder.setPositiveButton(R.string.open_settings) { _, _ -> onOpenSettings() }
+        }
+        builder.show()
+    }
+
+    fun showDistanceGpsDisabledDialog(
+        context: Context,
+        onOpenLocationSettings: () -> Unit
+    ) {
+        MaterialAlertDialogBuilder(context)
+            .setTitle(R.string.distance_gps_disabled_title)
+            .setMessage(R.string.distance_gps_disabled_message)
+            .setNegativeButton(R.string.cancel, null)
+            .setPositiveButton(R.string.enable_gps) { _, _ -> onOpenLocationSettings() }
+            .show()
+    }
+
+    fun openAppPermissionSettings(context: Context) {
+        try {
+            context.startActivity(
+                Intent(
+                    Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    Uri.fromParts("package", context.packageName, null)
+                )
+            )
+        } catch (_: Exception) {
+        }
+    }
+
+    fun openDeviceLocationSettings(context: Context) {
+        try {
+            context.startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
+        } catch (_: Exception) {
+        }
+    }
+
+    fun showPhotoSourceBottomSheet(
+        context: Context,
+        @StringRes titleRes: Int,
+        onTakePhoto: () -> Unit,
+        onChooseGallery: () -> Unit
+    ) {
+        val dialog = BottomSheetDialog(context)
+        val sheetView = LayoutInflater.from(context).inflate(R.layout.bottom_sheet_photo_source, null)
+        sheetView.findViewById<TextView>(R.id.tvPhotoSheetTitle).setText(titleRes)
+        sheetView.findViewById<View>(R.id.cardOptionCamera).setOnClickListener {
+            dialog.dismiss()
+            onTakePhoto()
+        }
+        sheetView.findViewById<View>(R.id.cardOptionGallery).setOnClickListener {
+            dialog.dismiss()
+            onChooseGallery()
+        }
+        sheetView.findViewById<View>(R.id.btnPhotoSourceCancel).setOnClickListener {
+            dialog.dismiss()
+        }
+        dialog.setContentView(sheetView)
+        dialog.show()
     }
 }

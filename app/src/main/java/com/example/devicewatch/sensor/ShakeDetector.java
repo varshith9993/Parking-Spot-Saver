@@ -10,8 +10,8 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
 /**
- * Foreground-only accelerometer shake detector with multi-peak filtering and cooldown
- * to avoid false triggers while walking or handling the phone normally.
+ * Foreground-only accelerometer shake detector requiring sustained continuous shaking (>= 1.5s)
+ * before triggering, followed by a strict 10-second cooldown that ignores ongoing shakes.
  */
 public class ShakeDetector implements SensorEventListener {
 
@@ -22,13 +22,14 @@ public class ShakeDetector implements SensorEventListener {
     public static final int SENSITIVITY_NORMAL = 0;
     public static final int SENSITIVITY_HIGH = 1;
 
-    private static final float NORMAL_G_THRESHOLD = 2.4f;
-    private static final float HIGH_G_THRESHOLD = 1.85f;
-    private static final int NORMAL_MIN_PEAKS = 3;
-    private static final int HIGH_MIN_PEAKS = 2;
-    private static final long MIN_PEAK_GAP_MS = 120L;
-    private static final long SHAKE_WINDOW_MS = 700L;
-    private static final long COOLDOWN_MS = 4000L;
+    private static final float NORMAL_G_THRESHOLD = 2.0f;
+    private static final float HIGH_G_THRESHOLD = 1.6f;
+    private static final long REQUIRED_SHAKE_DURATION_MS = 1500L;
+    private static final int NORMAL_MIN_IMPULSES = 5;
+    private static final int HIGH_MIN_IMPULSES = 4;
+    private static final long MIN_IMPULSE_GAP_MS = 100L;
+    private static final long MAX_PAUSE_BETWEEN_IMPULSES_MS = 450L;
+    private static final long COOLDOWN_MS = 10_000L;
 
     @Nullable
     private final SensorManager sensorManager;
@@ -39,10 +40,11 @@ public class ShakeDetector implements SensorEventListener {
 
     private int sensitivity = SENSITIVITY_NORMAL;
     private boolean isRegistered = false;
-    private int peakCount = 0;
-    private long firstPeakTimeMs = 0L;
-    private long lastPeakTimeMs = 0L;
-    private long lastTriggerTimeMs = 0L;
+    private long shakeStartTimeMs = 0L;
+    private long lastImpulseTimeMs = 0L;
+    private long lastCountedImpulseTimeMs = 0L;
+    private int impulseCount = 0;
+    private long cooldownUntilMs = 0L;
 
     public ShakeDetector(@NonNull Context context, @NonNull OnShakeListener listener) {
         Context appContext = context.getApplicationContext();
@@ -53,20 +55,29 @@ public class ShakeDetector implements SensorEventListener {
         this.listener = listener;
     }
 
+    /**
+     * Sensor-less constructor for deterministic JVM unit testing of duration and cooldown logic.
+     */
+    public ShakeDetector(@NonNull OnShakeListener listener) {
+        this.sensorManager = null;
+        this.accelerometer = null;
+        this.listener = listener;
+    }
+
     public boolean isAccelerometerAvailable() {
         return sensorManager != null && accelerometer != null;
     }
 
     public void setSensitivity(int sensitivity) {
         this.sensitivity = sensitivity == SENSITIVITY_HIGH ? SENSITIVITY_HIGH : SENSITIVITY_NORMAL;
-        resetPeaks();
+        resetShakeState();
     }
 
     public void start() {
         if (isRegistered || sensorManager == null || accelerometer == null) {
             return;
         }
-        resetPeaks();
+        resetShakeState();
         isRegistered = sensorManager.registerListener(this, accelerometer, SensorManager.SENSOR_DELAY_UI);
     }
 
@@ -76,7 +87,7 @@ public class ShakeDetector implements SensorEventListener {
         }
         sensorManager.unregisterListener(this);
         isRegistered = false;
-        resetPeaks();
+        resetShakeState();
     }
 
     @Override
@@ -90,35 +101,50 @@ public class ShakeDetector implements SensorEventListener {
         float gz = event.values[2] / SensorManager.GRAVITY_EARTH;
         double gForce = Math.sqrt(gx * gx + gy * gy + gz * gz);
 
+        processSample(gForce, System.currentTimeMillis());
+    }
+
+    /**
+     * Evaluates a single normalized G-force sample at {@code nowMs}.
+     * Returns true when a continuous 1.5s shake triggers outside the 10s cooldown.
+     */
+    public boolean processSample(double gForce, long nowMs) {
+        // Ignore all accelerometer spikes while 10s cooldown is active.
+        if (nowMs < cooldownUntilMs) {
+            resetShakeState();
+            return false;
+        }
+
         float threshold = sensitivity == SENSITIVITY_HIGH ? HIGH_G_THRESHOLD : NORMAL_G_THRESHOLD;
         if (gForce < threshold) {
-            return;
-        }
-
-        long now = System.currentTimeMillis();
-        if (now - lastTriggerTimeMs < COOLDOWN_MS) {
-            return;
-        }
-
-        if (now - firstPeakTimeMs > SHAKE_WINDOW_MS) {
-            peakCount = 0;
-            firstPeakTimeMs = now;
-        }
-
-        if (peakCount == 0 || (now - lastPeakTimeMs) >= MIN_PEAK_GAP_MS) {
-            if (peakCount == 0) {
-                firstPeakTimeMs = now;
+            if (shakeStartTimeMs != 0L && (nowMs - lastImpulseTimeMs) > MAX_PAUSE_BETWEEN_IMPULSES_MS) {
+                resetShakeState();
             }
-            peakCount++;
-            lastPeakTimeMs = now;
+            return false;
         }
 
-        int requiredPeaks = sensitivity == SENSITIVITY_HIGH ? HIGH_MIN_PEAKS : NORMAL_MIN_PEAKS;
-        if (peakCount >= requiredPeaks) {
-            lastTriggerTimeMs = now;
-            resetPeaks();
-            listener.onShakeDetected();
+        if (shakeStartTimeMs == 0L || (nowMs - lastImpulseTimeMs) > MAX_PAUSE_BETWEEN_IMPULSES_MS) {
+            shakeStartTimeMs = nowMs;
+            lastImpulseTimeMs = nowMs;
+            lastCountedImpulseTimeMs = nowMs;
+            impulseCount = 1;
+            return false;
         }
+
+        lastImpulseTimeMs = nowMs;
+        if ((nowMs - lastCountedImpulseTimeMs) >= MIN_IMPULSE_GAP_MS) {
+            impulseCount++;
+            lastCountedImpulseTimeMs = nowMs;
+        }
+
+        int minImpulses = sensitivity == SENSITIVITY_HIGH ? HIGH_MIN_IMPULSES : NORMAL_MIN_IMPULSES;
+        if ((nowMs - shakeStartTimeMs) >= REQUIRED_SHAKE_DURATION_MS && impulseCount >= minImpulses) {
+            cooldownUntilMs = nowMs + COOLDOWN_MS;
+            resetShakeState();
+            listener.onShakeDetected();
+            return true;
+        }
+        return false;
     }
 
     @Override
@@ -126,9 +152,10 @@ public class ShakeDetector implements SensorEventListener {
         // Not needed for accelerometer threshold detection.
     }
 
-    private void resetPeaks() {
-        peakCount = 0;
-        firstPeakTimeMs = 0L;
-        lastPeakTimeMs = 0L;
+    private void resetShakeState() {
+        shakeStartTimeMs = 0L;
+        lastImpulseTimeMs = 0L;
+        lastCountedImpulseTimeMs = 0L;
+        impulseCount = 0;
     }
 }

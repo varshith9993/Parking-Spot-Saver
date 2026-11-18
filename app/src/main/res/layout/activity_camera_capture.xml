@@ -19,7 +19,7 @@
         android:id="@+id/topBar"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:background="#66000000"
+        android:background="#73000000"
         android:gravity="center_vertical"
         android:orientation="horizontal"
         android:paddingHorizontal="16dp"
@@ -41,18 +41,31 @@
             android:id="@+id/tvCameraGpsStatus"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
+            android:layout_marginHorizontal="8dp"
             android:layout_weight="1"
-            android:gravity="end"
+            android:ellipsize="end"
+            android:gravity="center"
+            android:maxLines="1"
             android:text="@string/camera_gps_checking"
             android:textAppearance="@style/TextAppearance.Material3.LabelMedium"
             android:textColor="#FFFFFF" />
+
+        <ImageButton
+            android:id="@+id/btnSwitchCamera"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/camera_switch"
+            android:padding="10dp"
+            android:src="@drawable/ic_camera_switch"
+            app:tint="#FFFFFF" />
     </LinearLayout>
 
     <LinearLayout
         android:id="@+id/bottomBar"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:background="#80000000"
+        android:background="#8C000000"
         android:gravity="center"
         android:orientation="vertical"
         android:paddingHorizontal="24dp"
@@ -61,15 +74,138 @@
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent">
 
+        <LinearLayout
+            android:id="@+id/zoomControlsRow"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="16dp"
+            android:background="@android:color/transparent"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnCameraZoomOut"
+                style="@style/Widget.Material3.Button.TonalButton"
+                android:layout_width="44dp"
+                android:layout_height="40dp"
+                android:contentDescription="@string/zoom_out"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:minWidth="0dp"
+                android:padding="0dp"
+                android:text="−"
+                android:textColor="#FFFFFF"
+                android:textSize="18sp"
+                app:backgroundTint="#4DFFFFFF"
+                app:cornerRadius="20dp" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnCameraZoomLevel"
+                style="@style/Widget.Material3.Button.TextButton"
+                android:layout_width="wrap_content"
+                android:layout_height="40dp"
+                android:layout_marginHorizontal="10dp"
+                android:contentDescription="@string/camera_zoom_reset"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:minWidth="64dp"
+                android:paddingHorizontal="14dp"
+                android:text="1.0x"
+                android:textAllCaps="false"
+                android:textColor="#FFFFFF"
+                android:textStyle="bold"
+                app:backgroundTint="#33FFFFFF"
+                app:cornerRadius="20dp" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnCameraZoomIn"
+                style="@style/Widget.Material3.Button.TonalButton"
+                android:layout_width="44dp"
+                android:layout_height="40dp"
+                android:contentDescription="@string/zoom_in"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:minWidth="0dp"
+                android:padding="0dp"
+                android:text="+"
+                android:textColor="#FFFFFF"
+                android:textSize="18sp"
+                app:backgroundTint="#4DFFFFFF"
+                app:cornerRadius="20dp" />
+        </LinearLayout>
+
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnCapturePhoto"
             android:layout_width="wrap_content"
             android:layout_height="52dp"
-            android:minWidth="180dp"
+            android:minWidth="196dp"
             android:text="@string/capture_photo"
             android:textAllCaps="false"
             app:backgroundTint="@color/ps_primary"
             app:cornerRadius="26dp" />
     </LinearLayout>
+
+    <androidx.constraintlayout.widget.ConstraintLayout
+        android:id="@+id/previewConfirmOverlay"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:background="#000000"
+        android:clickable="true"
+        android:focusable="true"
+        android:visibility="gone"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent">
+
+        <ImageView
+            android:id="@+id/ivCapturedPreview"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:contentDescription="@string/parking_photo_label"
+            android:scaleType="fitCenter"
+            app:layout_constraintBottom_toTopOf="@id/previewConfirmBottomBar"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toTopOf="parent" />
+
+        <LinearLayout
+            android:id="@+id/previewConfirmBottomBar"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:background="#B3000000"
+            android:gravity="center"
+            android:orientation="horizontal"
+            android:paddingHorizontal="20dp"
+            android:paddingVertical="18dp"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnRetakePhoto"
+                style="@style/Widget.Material3.Button.OutlinedButton"
+                android:layout_width="0dp"
+                android:layout_height="50dp"
+                android:layout_marginEnd="10dp"
+                android:layout_weight="1"
+                android:text="@string/camera_retake"
+                android:textAllCaps="false"
+                android:textColor="#FFFFFF"
+                app:cornerRadius="25dp"
+                app:strokeColor="#80FFFFFF" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnConfirmPhoto"
+                android:layout_width="0dp"
+                android:layout_height="50dp"
+                android:layout_marginStart="10dp"
+                android:layout_weight="1"
+                android:text="@string/camera_use_photo"
+                android:textAllCaps="false"
+                app:backgroundTint="@color/ps_primary"
+                app:cornerRadius="25dp" />
+        </LinearLayout>
+    </androidx.constraintlayout.widget.ConstraintLayout>
 
 </androidx.constraintlayout.widget.ConstraintLayout>

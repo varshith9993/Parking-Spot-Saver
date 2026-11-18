@@ -40,6 +40,17 @@
             android:textColor="@color/ps_text_primary"
             android:textStyle="bold"
             tools:text="Saved Location" />
+
+        <ImageButton
+            android:id="@+id/btnDetailBookmark"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/toggle_bookmark_desc"
+            android:padding="10dp"
+            android:scaleType="centerInside"
+            android:src="@drawable/ic_bookmark_outline"
+            app:tint="@color/ps_text_secondary" />
     </LinearLayout>
 
     <View
@@ -195,8 +206,64 @@
                         android:background="@color/ps_card_stroke" />
 
                     <LinearLayout
+                        android:id="@+id/layoutDetailPlaceLabel"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="@string/place_label_title"
+                                android:textAppearance="@style/TextAppearance.Material3.LabelSmall"
+                                android:textColor="@color/ps_text_secondary" />
+
+                            <TextView
+                                android:id="@+id/tvDetailPlaceLabel"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="2dp"
+                                android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
+                                android:textColor="@color/ps_text_primary"
+                                tools:text="B2 parking, near lift" />
+                        </LinearLayout>
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnDetailEditPlaceLabel"
+                            style="@style/Widget.Material3.Button.TextButton"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="@string/add_place_label"
+                            android:textAllCaps="false" />
+                    </LinearLayout>
+
+                    <View
+                        android:id="@+id/dividerDetailPlaceLabel"
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:layout_marginVertical="12dp"
+                        android:background="@color/ps_card_stroke" />
+
+                    <TextView
+                        android:id="@+id/tvDetailRelativeTime"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:textAppearance="@style/TextAppearance.Material3.TitleSmall"
+                        android:textColor="@color/ps_primary"
+                        android:textStyle="bold"
+                        tools:text="2 days ago" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
                         android:baselineAligned="false"
                         android:orientation="horizontal">
 
@@ -251,6 +318,72 @@
                         android:layout_marginVertical="12dp"
                         android:background="@color/ps_card_stroke" />
 
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/distance_label"
+                        android:textAppearance="@style/TextAppearance.Material3.LabelSmall"
+                        android:textColor="@color/ps_text_secondary" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginEnd="10dp"
+                            android:layout_weight="1"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal">
+
+                            <ProgressBar
+                                android:id="@+id/pbDetailDistance"
+                                style="?android:attr/progressBarStyleSmall"
+                                android:layout_width="16dp"
+                                android:layout_height="16dp"
+                                android:layout_marginEnd="8dp"
+                                android:indeterminateTint="@color/ps_primary"
+                                android:visibility="gone" />
+
+                            <TextView
+                                android:id="@+id/tvDetailDistance"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:ellipsize="end"
+                                android:maxLines="2"
+                                android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
+                                android:textColor="@color/ps_primary"
+                                android:textStyle="bold"
+                                android:visibility="gone"
+                                tools:text="350 m away"
+                                tools:visibility="visible" />
+                        </LinearLayout>
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnDetailDistance"
+                            style="@style/Widget.Material3.Button.OutlinedButton"
+                            android:layout_width="wrap_content"
+                            android:layout_height="36dp"
+                            android:insetTop="0dp"
+                            android:insetBottom="0dp"
+                            android:minWidth="0dp"
+                            android:paddingHorizontal="14dp"
+                            android:text="@string/show_distance"
+                            android:textAllCaps="false"
+                            android:textSize="13sp"
+                            app:cornerRadius="8dp" />
+                    </LinearLayout>
+
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:layout_marginVertical="12dp"
+                        android:background="@color/ps_card_stroke" />
+
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
@@ -290,7 +423,7 @@
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
-            <!-- Photo & Metadata Card -->
+            <!-- Multi-Photo Gallery & Metadata Card -->
             <com.google.android.material.card.MaterialCardView
                 android:id="@+id/cardDetailPhoto"
                 android:layout_width="match_parent"
@@ -308,57 +441,49 @@
                     android:orientation="vertical"
                     android:padding="16dp">
 
-                    <TextView
-                        android:layout_width="wrap_content"
+                    <LinearLayout
+                        android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="@string/parking_photo_label"
-                        android:textAppearance="@style/TextAppearance.Material3.LabelMedium"
-                        android:textColor="@color/ps_text_secondary" />
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
 
-                    <com.google.android.material.card.MaterialCardView
-                        android:id="@+id/cardDetailPhotoContainer"
+                        <TextView
+                            android:id="@+id/tvDetailPhotoHeader"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:textAppearance="@style/TextAppearance.Material3.LabelMedium"
+                            android:textColor="@color/ps_text_secondary"
+                            tools:text="Photos (2 / 5)" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnDetailAddPhoto"
+                            style="@style/Widget.Material3.Button.OutlinedButton"
+                            android:layout_width="wrap_content"
+                            android:layout_height="36dp"
+                            android:text="@string/add_photo"
+                            android:textAllCaps="false"
+                            android:visibility="gone"
+                            app:cornerRadius="8dp" />
+                    </LinearLayout>
+
+                    <TextView
+                        android:id="@+id/tvDetailPhotoHint"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:text="@string/no_photos_attached"
+                        android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+                        android:textColor="@color/ps_text_secondary"
+                        android:visibility="gone" />
+
+                    <androidx.recyclerview.widget.RecyclerView
+                        android:id="@+id/rvDetailPhotos"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="10dp"
-                        android:visibility="gone"
-                        app:cardCornerRadius="10dp"
-                        app:cardElevation="0dp"
-                        app:strokeColor="@color/ps_card_stroke"
-                        app:strokeWidth="1dp">
-
-                        <FrameLayout
-                            android:layout_width="match_parent"
-                            android:layout_height="180dp">
-
-                            <ImageView
-                                android:id="@+id/ivDetailPhoto"
-                                android:layout_width="match_parent"
-                                android:layout_height="match_parent"
-                                android:contentDescription="@string/photo_preview_title"
-                                android:scaleType="centerCrop" />
-
-                            <TextView
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:layout_gravity="bottom|end"
-                                android:layout_margin="8dp"
-                                android:background="#99000000"
-                                android:paddingHorizontal="8dp"
-                                android:paddingVertical="3dp"
-                                android:text="@string/tap_to_preview"
-                                android:textAppearance="@style/TextAppearance.Material3.LabelSmall"
-                                android:textColor="#FFFFFF" />
-                        </FrameLayout>
-                    </com.google.android.material.card.MaterialCardView>
-
-                    <TextView
-                        android:id="@+id/tvDetailPhotoMissing"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp"
-                        android:text="@string/photo_missing_notice"
-                        android:textAppearance="@style/TextAppearance.Material3.BodySmall"
-                        android:textColor="@color/ps_error"
+                        android:clipToPadding="false"
+                        android:orientation="horizontal"
                         android:visibility="gone" />
 
                     <LinearLayout
@@ -391,18 +516,38 @@
             </com.google.android.material.card.MaterialCardView>
 
             <!-- Actions -->
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btnDetailNavigate"
+            <LinearLayout
                 android:layout_width="match_parent"
-                android:layout_height="48dp"
+                android:layout_height="wrap_content"
                 android:layout_marginTop="14dp"
-                android:text="@string/navigate"
-                android:textAllCaps="false"
-                android:textColor="@color/ps_on_primary"
-                app:backgroundTint="@color/ps_primary"
-                app:cornerRadius="10dp"
-                app:icon="@drawable/ic_directions"
-                app:iconTint="@color/ps_on_primary" />
+                android:orientation="horizontal">
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnDetailNavigate"
+                    android:layout_width="0dp"
+                    android:layout_height="48dp"
+                    android:layout_marginEnd="6dp"
+                    android:layout_weight="1.4"
+                    android:text="@string/navigate"
+                    android:textAllCaps="false"
+                    android:textColor="@color/ps_on_primary"
+                    app:backgroundTint="@color/ps_primary"
+                    app:cornerRadius="10dp"
+                    app:icon="@drawable/ic_directions"
+                    app:iconTint="@color/ps_on_primary" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnDetailShare"
+                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:layout_width="0dp"
+                    android:layout_height="48dp"
+                    android:layout_marginStart="6dp"
+                    android:layout_weight="1"
+                    android:text="@string/share"
+                    android:textAllCaps="false"
+                    app:cornerRadius="10dp"
+                    app:icon="@drawable/ic_share" />
+            </LinearLayout>
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnDetailSetActive"

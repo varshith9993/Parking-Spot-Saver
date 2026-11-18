@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#000000">
+
+    <ImageView
+        android:id="@+id/ivViewerPageImage"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:contentDescription="@string/parking_photo_label"
+        android:scaleType="fitCenter" />
+
+    <TextView
+        android:id="@+id/tvViewerPageMissing"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:gravity="center"
+        android:padding="24dp"
+        android:text="@string/photo_missing_notice"
+        android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
+        android:textColor="#FCA5A5"
+        android:visibility="gone" />
+</FrameLayout>

@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<com.google.android.material.card.MaterialCardView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="88dp"
+    android:layout_height="88dp"
+    android:layout_marginEnd="10dp"
+    android:clickable="true"
+    android:focusable="true"
+    app:cardBackgroundColor="@color/ps_subtle_bg"
+    app:cardCornerRadius="12dp"
+    app:cardElevation="0dp"
+    app:strokeColor="@color/ps_card_stroke"
+    app:strokeWidth="1dp">
+
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent">
+
+        <ImageView
+            android:id="@+id/ivPhotoThumb"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:contentDescription="@string/parking_photo_label"
+            android:scaleType="centerCrop" />
+
+        <TextView
+            android:id="@+id/tvPhotoThumbMissing"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="@color/ps_denied_bg"
+            android:gravity="center"
+            android:padding="6dp"
+            android:text="!"
+            android:textColor="@color/ps_denied_text"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:visibility="gone" />
+
+        <ImageButton
+            android:id="@+id/btnRemovePhotoThumb"
+            android:layout_width="26dp"
+            android:layout_height="26dp"
+            android:layout_gravity="top|end"
+            android:layout_margin="5dp"
+            android:background="@drawable/bg_circle_badge_dark"
+            android:contentDescription="@string/remove_single_photo"
+            android:padding="5dp"
+            android:scaleType="centerInside"
+            android:src="@drawable/ic_photo_remove"
+            android:visibility="gone" />
+    </FrameLayout>
+</com.google.android.material.card.MaterialCardView>

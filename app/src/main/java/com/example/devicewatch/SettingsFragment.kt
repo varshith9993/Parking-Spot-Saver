@@ -18,6 +18,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.fragment.app.Fragment
 import com.example.devicewatch.databinding.FragmentSettingsBinding
+import com.example.devicewatch.navigation.NavigationManager
 import com.example.devicewatch.sensor.ShakeDetector
 import com.example.devicewatch.storage.ParkingPhotoManager
 import com.example.devicewatch.storage.ParkingStorage
@@ -85,6 +86,29 @@ class SettingsFragment : Fragment() {
             startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
         }
 
+        binding.toggleThemeMode.addOnButtonCheckedListener { _, checkedId, isChecked ->
+            if (isUpdatingControls || !isChecked) return@addOnButtonCheckedListener
+            val mode = when (checkedId) {
+                R.id.btnThemeLight -> AppCompatDelegate.MODE_NIGHT_NO
+                R.id.btnThemeDark -> AppCompatDelegate.MODE_NIGHT_YES
+                else -> AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM
+            }
+            if (parkingStorage.getThemeMode() != mode) {
+                parkingStorage.setThemeMode(mode)
+                AppCompatDelegate.setDefaultNightMode(mode)
+            }
+        }
+
+        binding.toggleNavMode.addOnButtonCheckedListener { _, checkedId, isChecked ->
+            if (isUpdatingControls || !isChecked) return@addOnButtonCheckedListener
+            val nextMode = if (checkedId == R.id.btnNavDriving) {
+                NavigationManager.TRAVEL_DRIVING
+            } else {
+                NavigationManager.TRAVEL_WALKING
+            }
+            parkingStorage.setNavigationTravelMode(nextMode)
+        }
+
         binding.switchSettingsShake.setOnCheckedChangeListener { _, isChecked ->
             if (isUpdatingControls) return@setOnCheckedChangeListener
             parkingStorage.setShakeToSaveEnabled(isChecked)
@@ -103,19 +127,6 @@ class SettingsFragment : Fragment() {
             (activity as? MainActivity)?.updateShakeConfigFromSettings()
         }
 
-        binding.toggleThemeMode.addOnButtonCheckedListener { _, checkedId, isChecked ->
-            if (isUpdatingControls || !isChecked) return@addOnButtonCheckedListener
-            val mode = when (checkedId) {
-                R.id.btnThemeLight -> AppCompatDelegate.MODE_NIGHT_NO
-                R.id.btnThemeDark -> AppCompatDelegate.MODE_NIGHT_YES
-                else -> AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM
-            }
-            if (parkingStorage.getThemeMode() != mode) {
-                parkingStorage.setThemeMode(mode)
-                AppCompatDelegate.setDefaultNightMode(mode)
-            }
-        }
-
         binding.btnSettingsClearCurrent.setOnClickListener { confirmClearCurrentSpot() }
         binding.btnSettingsClearHistory.setOnClickListener { confirmClearHistory() }
         binding.btnSettingsDeleteAll.setOnClickListener { confirmDeleteAll() }
@@ -124,7 +135,7 @@ class SettingsFragment : Fragment() {
     fun refreshState() {
         if (!isAdded || _binding == null) return
         updatePermissionRows()
-        updateGestureAndAppearanceControls()
+        updateControlsFromPrefs()
         updateDataManagementButtons()
     }
 
@@ -206,9 +217,23 @@ class SettingsFragment : Fragment() {
         }
     }
 
-    private fun updateGestureAndAppearanceControls() {
+    private fun updateControlsFromPrefs() {
         isUpdatingControls = true
         try {
+            val themeButtonId = when (parkingStorage.getThemeMode()) {
+                AppCompatDelegate.MODE_NIGHT_NO -> R.id.btnThemeLight
+                AppCompatDelegate.MODE_NIGHT_YES -> R.id.btnThemeDark
+                else -> R.id.btnThemeSystem
+            }
+            binding.toggleThemeMode.check(themeButtonId)
+
+            val navButtonId = if (parkingStorage.getNavigationTravelMode() == NavigationManager.TRAVEL_DRIVING) {
+                R.id.btnNavDriving
+            } else {
+                R.id.btnNavWalking
+            }
+            binding.toggleNavMode.check(navButtonId)
+
             val detector = ShakeDetector(requireContext()) {}
             if (!detector.isAccelerometerAvailable()) {
                 binding.switchSettingsShake.isChecked = false
@@ -228,13 +253,6 @@ class SettingsFragment : Fragment() {
                 }
                 binding.toggleSettingsSensitivity.check(sensitivityId)
             }
-
-            val themeButtonId = when (parkingStorage.getThemeMode()) {
-                AppCompatDelegate.MODE_NIGHT_NO -> R.id.btnThemeLight
-                AppCompatDelegate.MODE_NIGHT_YES -> R.id.btnThemeDark
-                else -> R.id.btnThemeSystem
-            }
-            binding.toggleThemeMode.check(themeButtonId)
         } finally {
             isUpdatingControls = false
         }

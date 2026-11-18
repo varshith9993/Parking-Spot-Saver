@@ -25,6 +25,7 @@ import java.util.Locale;
 import java.util.TimeZone;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Manages parking photo persistence in app-private storage, EXIF metadata preservation,
@@ -66,6 +67,7 @@ public class ParkingPhotoManager {
 
     private static final String PHOTOS_DIR = "parking_photos";
     private static final int BUFFER_SIZE = 8192;
+    private static final AtomicInteger FILE_SEQUENCE = new AtomicInteger(0);
 
     private final Context appContext;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -81,7 +83,10 @@ public class ParkingPhotoManager {
         if (!dir.exists() && !dir.mkdirs()) {
             throw new IOException("Unable to create parking photos directory.");
         }
-        return new File(dir, "spot_" + System.currentTimeMillis() + ".jpg");
+        return new File(
+                dir,
+                "spot_" + System.currentTimeMillis() + "_" + FILE_SEQUENCE.incrementAndGet() + ".jpg"
+        );
     }
 
     /**

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <style name="Theme.DeviceWatch" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/ps_primary</item>
+        <item name="colorOnPrimary">@color/ps_on_primary</item>
+        <item name="colorPrimaryContainer">@color/ps_primary_container</item>
+        <item name="colorOnPrimaryContainer">@color/ps_on_primary_container</item>
+        <item name="colorSurface">@color/ps_card_bg</item>
+        <item name="colorSurfaceContainer">@color/ps_card_bg</item>
+        <item name="colorSurfaceContainerHigh">@color/ps_card_bg</item>
+        <item name="android:windowBackground">@color/ps_surface</item>
+        <item name="android:colorBackground">@color/ps_surface</item>
+        <item name="colorOnSurface">@color/ps_text_primary</item>
+        <item name="colorOnSurfaceVariant">@color/ps_text_secondary</item>
+        <item name="colorOutline">@color/ps_card_stroke</item>
+        <item name="colorError">@color/ps_error</item>
+    </style>
+</resources>

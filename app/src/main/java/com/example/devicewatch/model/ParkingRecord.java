@@ -5,11 +5,14 @@ import androidx.annotation.Nullable;
 
 import com.example.devicewatch.location.DistanceCalculator;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.UUID;
 
 /**
- * Structured local parking record representing a saved or historical parking spot
- * along with separated photo capture/import metadata.
+ * Structured local parking record representing a parking spot, optional place label,
+ * up to 5 attached photos with separated EXIF metadata, and manual bookmark status.
  */
 public class ParkingRecord {
 
@@ -18,17 +21,107 @@ public class ParkingRecord {
     private final double latitude;
     private final double longitude;
     @Nullable
+    private final String placeLabel;
+    @Nullable
     private final String address;
     private final long savedTimestamp;
     @Nullable
     private final String note;
-    @Nullable
-    private final String photoPath;
+    @NonNull
+    private final List<ParkingPhotoItem> photos;
+    private final boolean isSaved;
 
-    private final long originalCaptureTimestamp;
-    private final double photoLatitude;
-    private final double photoLongitude;
-    private final long importTimestamp;
+    public ParkingRecord(
+            @NonNull String id,
+            double latitude,
+            double longitude,
+            @Nullable String placeLabel,
+            @Nullable String address,
+            long savedTimestamp,
+            @Nullable String note,
+            @Nullable List<ParkingPhotoItem> photos,
+            boolean isSaved
+    ) {
+        this.id = id;
+        this.latitude = latitude;
+        this.longitude = longitude;
+        this.placeLabel = placeLabel;
+        this.address = address;
+        this.savedTimestamp = savedTimestamp;
+        this.note = note;
+        if (photos == null || photos.isEmpty()) {
+            this.photos = Collections.emptyList();
+        } else {
+            int limit = Math.min(photos.size(), ParkingPhotoItem.MAX_PHOTOS_PER_RECORD);
+            this.photos = Collections.unmodifiableList(new ArrayList<>(photos.subList(0, limit)));
+        }
+        this.isSaved = isSaved;
+    }
+
+    public ParkingRecord(
+            @NonNull String id,
+            double latitude,
+            double longitude,
+            @Nullable String placeLabel,
+            @Nullable String address,
+            long savedTimestamp,
+            @Nullable String note,
+            @Nullable String photoPath,
+            long originalCaptureTimestamp,
+            double photoLatitude,
+            double photoLongitude,
+            long importTimestamp,
+            boolean isSaved
+    ) {
+        this(
+                id,
+                latitude,
+                longitude,
+                placeLabel,
+                address,
+                savedTimestamp,
+                note,
+                buildSinglePhotoList(
+                        photoPath,
+                        originalCaptureTimestamp,
+                        photoLatitude,
+                        photoLongitude,
+                        importTimestamp
+                ),
+                isSaved
+        );
+    }
+
+    public ParkingRecord(
+            @NonNull String id,
+            double latitude,
+            double longitude,
+            @Nullable String placeLabel,
+            @Nullable String address,
+            long savedTimestamp,
+            @Nullable String note,
+            @Nullable String photoPath,
+            long originalCaptureTimestamp,
+            double photoLatitude,
+            double photoLongitude,
+            long importTimestamp
+    ) {
+        this(
+                id,
+                latitude,
+                longitude,
+                placeLabel,
+                address,
+                savedTimestamp,
+                note,
+                photoPath,
+                originalCaptureTimestamp,
+                photoLatitude,
+                photoLongitude,
+                importTimestamp,
+                false
+        );
+    }
 
     public ParkingRecord(
             @NonNull String id,
@@ -43,33 +136,75 @@ public class ParkingRecord {
             double photoLongitude,
             long importTimestamp
     ) {
-        this.id = id;
-        this.latitude = latitude;
-        this.longitude = longitude;
-        this.address = address;
-        this.savedTimestamp = savedTimestamp;
-        this.note = note;
-        this.photoPath = photoPath;
-        this.originalCaptureTimestamp = originalCaptureTimestamp;
-        this.photoLatitude = photoLatitude;
-        this.photoLongitude = photoLongitude;
-        this.importTimestamp = importTimestamp;
+        this(
+                id,
+                latitude,
+                longitude,
+                null,
+                address,
+                savedTimestamp,
+                note,
+                photoPath,
+                originalCaptureTimestamp,
+                photoLatitude,
+                photoLongitude,
+                importTimestamp,
+                false
+        );
+    }
+
+    @NonNull
+    private static List<ParkingPhotoItem> buildSinglePhotoList(
+            @Nullable String photoPath,
+            long captureTs,
+            double lat,
+            double lng,
+            long importTs
+    ) {
+        if (photoPath == null || photoPath.trim().isEmpty()) {
+            return Collections.emptyList();
+        }
+        return Collections.singletonList(
+                new ParkingPhotoItem(photoPath, captureTs, lat, lng, importTs)
+        );
     }
 
     @NonNull
     public static ParkingRecord createNew(double latitude, double longitude, long savedTimestamp) {
+        return createNew(latitude, longitude, savedTimestamp, null, false);
+    }
+
+    @NonNull
+    public static ParkingRecord createNew(
+            double latitude,
+            double longitude,
+            long savedTimestamp,
+            @Nullable String placeLabel
+    ) {
+        return createNew(latitude, longitude, savedTimestamp, placeLabel, false);
+    }
+
+    @NonNull
+    public static ParkingRecord createNew(
+            double latitude,
+            double longitude,
+            long savedTimestamp,
+            @Nullable String placeLabel,
+            boolean isSaved
+    ) {
+        String normalizedLabel = placeLabel != null && !placeLabel.trim().isEmpty()
+                ? placeLabel.trim()
+                : null;
         return new ParkingRecord(
                 UUID.randomUUID().toString(),
                 latitude,
                 longitude,
+                normalizedLabel,
                 null,
                 savedTimestamp,
                 null,
-                null,
-                0L,
-                Double.NaN,
-                Double.NaN,
-                0L
+                Collections.emptyList(),
+                isSaved
         );
     }
 
@@ -79,6 +214,7 @@ public class ParkingRecord {
                 id,
                 spot.getLatitude(),
                 spot.getLongitude(),
+                null,
                 spot.getAddress(),
                 spot.getTimestampMillis(),
                 spot.getNote(),
@@ -86,7 +222,8 @@ public class ParkingRecord {
                 spot.getPhotoCapturedAtMillis(),
                 spot.getPhotoLatitude(),
                 spot.getPhotoLongitude(),
-                spot.getPhotoImportedAtMillis()
+                spot.getPhotoImportedAtMillis(),
+                false
         );
     }
 
@@ -98,11 +235,11 @@ public class ParkingRecord {
                 savedTimestamp,
                 address,
                 note,
-                photoPath,
-                originalCaptureTimestamp,
-                importTimestamp,
-                photoLatitude,
-                photoLongitude
+                getPhotoPath(),
+                getOriginalCaptureTimestamp(),
+                getImportTimestamp(),
+                getPhotoLatitude(),
+                getPhotoLongitude()
         );
     }
 
@@ -120,6 +257,11 @@ public class ParkingRecord {
     }
 
     @Nullable
+    public String getPlaceLabel() {
+        return placeLabel;
+    }
+
+    @Nullable
     public String getAddress() {
         return address;
     }
@@ -133,36 +275,49 @@ public class ParkingRecord {
         return note;
     }
 
+    @NonNull
+    public List<ParkingPhotoItem> getPhotos() {
+        return photos;
+    }
+
+    public int getPhotoCount() {
+        return photos.size();
+    }
+
     @Nullable
     public String getPhotoPath() {
-        return photoPath;
+        return photos.isEmpty() ? null : photos.get(0).getFilePath();
     }
 
     public long getOriginalCaptureTimestamp() {
-        return originalCaptureTimestamp;
+        return photos.isEmpty() ? 0L : photos.get(0).getOriginalCaptureTimestamp();
     }
 
     public double getPhotoLatitude() {
-        return photoLatitude;
+        return photos.isEmpty() ? Double.NaN : photos.get(0).getPhotoLatitude();
     }
 
     public double getPhotoLongitude() {
-        return photoLongitude;
+        return photos.isEmpty() ? Double.NaN : photos.get(0).getPhotoLongitude();
     }
 
     public long getImportTimestamp() {
-        return importTimestamp;
+        return photos.isEmpty() ? 0L : photos.get(0).getImportTimestamp();
+    }
+
+    public boolean isSaved() {
+        return isSaved;
     }
 
     public boolean hasOriginalCaptureTimestamp() {
-        return originalCaptureTimestamp > 0L;
+        return getOriginalCaptureTimestamp() > 0L;
     }
 
     public boolean hasImportTimestamp() {
-        return importTimestamp > 0L;
+        return getImportTimestamp() > 0L;
     }
 
     public boolean hasPhotoLocation() {
-        return DistanceCalculator.isValidCoordinate(photoLatitude, photoLongitude);
+        return DistanceCalculator.isValidCoordinate(getPhotoLatitude(), getPhotoLongitude());
     }
 }

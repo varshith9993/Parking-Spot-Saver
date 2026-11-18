@@ -12,6 +12,22 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
+    <queries>
+        <package android:name="com.google.android.apps.maps" />
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="google.navigation" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="geo" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="https" />
+        </intent>
+    </queries>
+
     <application
         android:name=".ParkingApp"
         android:allowBackup="true"
@@ -41,6 +57,11 @@
 
         <activity
             android:name=".ParkingRecordDetailActivity"
+            android:exported="false"
+            android:theme="@style/Theme.DeviceWatch" />
+
+        <activity
+            android:name=".PhotoViewerActivity"
             android:exported="false"
             android:theme="@style/Theme.DeviceWatch" />
     </application>
