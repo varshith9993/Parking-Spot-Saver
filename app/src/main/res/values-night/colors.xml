@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="ps_primary">#6DD58C</color>
+    <color name="ps_on_primary">#072E12</color>
+    <color name="ps_primary_container">#15331E</color>
+    <color name="ps_on_primary_container">#A8ECC0</color>
+    <color name="ps_accent_blue">#8AB4F8</color>
+    <color name="ps_surface">#111315</color>
+    <color name="ps_card_bg">#1B1F23</color>
+    <color name="ps_subtle_bg">#252A30</color>
+    <color name="ps_card_stroke">#2F363E</color>
+    <color name="ps_text_primary">#E8EAED</color>
+    <color name="ps_text_secondary">#9AA0A6</color>
+    <color name="ps_error">#F2B8B5</color>
+    <color name="ps_warning_bg">#3A2B0E</color>
+    <color name="ps_warning_text">#FCD34D</color>
+    <color name="ps_granted_bg">#15331E</color>
+    <color name="ps_granted_text">#81C995</color>
+    <color name="ps_denied_bg">#3B1B1B</color>
+    <color name="ps_denied_text">#F28B82</color>
+    <color name="ps_drag_handle">#4B5563</color>
+</resources>

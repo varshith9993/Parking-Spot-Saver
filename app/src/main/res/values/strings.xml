@@ -1,0 +1,172 @@
+<resources>
+    <string name="app_name">Parking Spot Saver</string>
+
+    <!-- Bottom Navigation -->
+    <string name="tab_home">Home</string>
+    <string name="tab_saved">Saved</string>
+    <string name="tab_history">History</string>
+    <string name="tab_settings">Settings</string>
+
+    <!-- Map & Home -->
+    <string name="map_attribution">© OpenFreeMap · OpenStreetMap</string>
+    <string name="zoom_in">Zoom in</string>
+    <string name="zoom_out">Zoom out</string>
+    <string name="center_my_location">My location</string>
+    <string name="choose_on_map">Choose location on map</string>
+    <string name="map_load_error">Map tiles unavailable right now. GPS saving, manual selection, and Google Maps navigation still work.</string>
+
+    <!-- Manual Pin Placement -->
+    <string name="pin_select_title">Choose parking location</string>
+    <string name="pin_select_hint">Move the map so the pin marks your vehicle.</string>
+    <string name="save_this_location">Save this location</string>
+    <string name="cancel">Cancel</string>
+    <string name="location_saved_toast">Parking location saved</string>
+
+    <!-- Home Empty & Active States -->
+    <string name="no_active_spot_title">No active parking spot</string>
+    <string name="no_active_spot_subtitle">Save your current GPS position or place a pin on the map.</string>
+    <string name="save_parking_location">Save Parking Location</string>
+    <string name="navigate">Navigate</string>
+    <string name="change_location">Change</string>
+    <string name="change_location_title">Change parking location</string>
+    <string name="use_current_gps">Use current GPS location</string>
+    <string name="remove_parking_spot">Remove parking spot</string>
+    <string name="remove_spot_confirm_title">Remove active parking spot?</string>
+    <string name="remove_spot_confirm_message">Removes the active spot from Home. Your Saved and History records stay intact.</string>
+    <string name="remove">Remove</string>
+
+    <!-- Location, Time & Distance -->
+    <string name="label_coordinates">Coordinates</string>
+    <string name="label_date">Date</string>
+    <string name="label_time">Time</string>
+    <string name="label_elapsed">Elapsed</string>
+    <string name="label_note">Note</string>
+    <string name="resolving_address">Resolving address…</string>
+    <string name="address_unavailable_fallback">Address unavailable</string>
+    <string name="loading_gps">Acquiring GPS location…</string>
+    <string name="waiting_live_gps">Waiting for GPS signal</string>
+    <string name="live_gps_active">Live distance tracking</string>
+    <string name="no_navigation_app">No maps or browser app available to open directions.</string>
+
+    <!-- Notes -->
+    <string name="add_note">Add Note</string>
+    <string name="edit_note">Edit Note</string>
+    <string name="remove_note">Remove</string>
+    <string name="note_hint">Level, bay, or landmark (optional)</string>
+    <string name="save">Save</string>
+    <string name="no_note_placeholder">No note added</string>
+
+    <!-- Photos & EXIF Metadata -->
+    <string name="parking_photo_label">Parking Photo</string>
+    <string name="add_or_change_photo">Add / Change Photo</string>
+    <string name="add_photo">Add Photo</string>
+    <string name="replace_photo">Change Photo</string>
+    <string name="remove_photo">Remove Photo</string>
+    <string name="choose_photo_source">Parking Photo</string>
+    <string name="take_photo">Take Photo (Camera)</string>
+    <string name="choose_from_gallery">Choose from Gallery</string>
+    <string name="capture_photo">Capture Photo</string>
+    <string name="camera_gps_checking">Checking GPS…</string>
+    <string name="camera_gps_ready">GPS coordinates ready</string>
+    <string name="camera_gps_unavailable">Photo GPS unavailable</string>
+    <string name="camera_permission_denied">Camera permission is needed to capture in-app. You can still pick a photo from Gallery.</string>
+    <string name="camera_capture_failed">Unable to capture photo. Please try again.</string>
+    <string name="camera_unavailable">Camera is unavailable on this device.</string>
+    <string name="photo_picker_unavailable">Photo picker is unavailable on this device.</string>
+    <string name="tap_to_preview">Tap to preview</string>
+    <string name="photo_preview_title">Parking Photo</string>
+    <string name="close">Close</string>
+    <string name="photo_missing_notice">Saved photo file is missing or inaccessible.</string>
+    <string name="saving_photo">Saving photo &amp; metadata…</string>
+    <string name="photo_captured_at">Photo captured: %1$s</string>
+    <string name="photo_imported_at">Photo imported: %1$s (original capture time unavailable)</string>
+    <string name="photo_time_unavailable">Photo capture time: Unavailable</string>
+    <string name="photo_gps_available">Photo GPS: %1$s</string>
+    <string name="photo_gps_unavailable">Photo GPS: Unavailable</string>
+
+    <!-- Permission & GPS Banners -->
+    <string name="permission_denied_message">Location permission is needed to save GPS spots and live distance. You can still drop a pin manually on the map.</string>
+    <string name="grant_permission">Allow</string>
+    <string name="open_settings">Settings</string>
+    <string name="gps_disabled_message">Device GPS is off. Enable location services or place a pin manually on the map.</string>
+    <string name="enable_gps">Enable GPS</string>
+
+    <!-- Saved Locations Screen -->
+    <string name="saved_title">Saved</string>
+    <string name="saved_count_format">%1$d locations</string>
+    <string name="saved_empty">No saved locations yet.\nSaved spots from GPS or map pin placement appear here.</string>
+    <string name="action_view">View</string>
+    <string name="delete">Delete</string>
+    <string name="delete_saved_title">Delete saved location?</string>
+    <string name="delete_saved_message">This removes the location from Saved. If it is active on Home, it will also be cleared from Home.</string>
+    <string name="set_as_active">Set Active on Home</string>
+    <string name="set_active_confirmation">Set as active spot on Home</string>
+
+    <!-- History Screen -->
+    <string name="history_title">History</string>
+    <string name="history_today">Today</string>
+    <string name="history_yesterday">Yesterday</string>
+    <string name="history_earlier">Earlier</string>
+    <string name="history_empty">No parking history yet.\nPrevious parking sessions appear here chronologically when you save a new location.</string>
+    <string name="clear_history_short">Clear</string>
+    <string name="clear_history_confirm_title">Clear parking history?</string>
+    <string name="clear_history_confirm_message">Removes all historical parking records. Your current active spot and Saved locations stay intact.</string>
+    <string name="clear_confirm_action">Clear</string>
+    <string name="delete_history_item_title">Delete history record?</string>
+    <string name="delete_history_item_message">Removes this record from History and deletes its photo if unused elsewhere.</string>
+    <string name="record_detail_saved_title">Saved Location</string>
+    <string name="record_detail_history_title">Parking History</string>
+    <string name="record_missing">This parking record is no longer available.</string>
+    <string name="back">Back</string>
+    <string name="delete_record">Delete Record</string>
+
+    <!-- Settings Screen -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_group_permissions">Permissions</string>
+    <string name="settings_group_location">Location</string>
+    <string name="settings_group_gestures">Gestures</string>
+    <string name="settings_group_appearance">Appearance</string>
+    <string name="settings_group_data">Data Management</string>
+
+    <string name="perm_precise_title">Precise Location</string>
+    <string name="perm_precise_desc">Provides accurate GPS coordinates and live walking distance to your vehicle.</string>
+    <string name="perm_approx_title">Approximate Location</string>
+    <string name="perm_approx_desc">Allows coarse positioning and centering the map near your area when precise GPS is off.</string>
+    <string name="perm_camera_title">Camera Access</string>
+    <string name="perm_camera_desc">Needed only when taking an in-app photo of your parking bay or landmark.</string>
+    <string name="perm_media_title">Photo &amp; Media Access</string>
+    <string name="perm_media_desc">Uses Android Photo Picker for temporary single-image access; broad storage permission is not requested.</string>
+    <string name="status_granted">Granted</string>
+    <string name="status_not_granted">Not granted</string>
+    <string name="status_on_demand">On-demand Picker</string>
+    <string name="action_request">Allow</string>
+    <string name="action_app_settings">App Settings</string>
+
+    <string name="location_accuracy_title">Location Accuracy</string>
+    <string name="location_accuracy_desc">Uses FusedLocationProviderClient high-accuracy mode when GPS is enabled, with manual map pin placement as an offline-safe fallback.</string>
+    <string name="open_device_location_settings">Open Device Location Settings</string>
+
+    <string name="shake_title">Shake to Save</string>
+    <string name="shake_desc">Detects firm multi-peak shakes while the app is in the foreground (4s cooldown) and starts the same GPS save workflow.</string>
+    <string name="shake_unavailable">Accelerometer unavailable on this device.</string>
+    <string name="shake_sensitivity_label">Sensitivity</string>
+    <string name="shake_sensitivity_normal">Normal</string>
+    <string name="shake_sensitivity_high">High</string>
+    <string name="shake_saved_confirmation">Shake detected — parking location saved</string>
+
+    <string name="theme_system">System</string>
+    <string name="theme_light">Light</string>
+    <string name="theme_dark">Dark</string>
+
+    <string name="clear_current_spot_setting">Clear current parking spot</string>
+    <string name="clear_history_setting">Clear parking history</string>
+    <string name="delete_all_data_setting">Clear all application parking data</string>
+    <string name="clear_current_confirm_title">Clear current parking spot?</string>
+    <string name="clear_current_confirm_message">Removes the active spot from Home without deleting Saved or History records.</string>
+    <string name="delete_all_confirm_title">Clear all parking data?</string>
+    <string name="delete_all_confirm_message">Permanently deletes the active spot, all Saved locations, full History, and all stored parking photos.</string>
+    <string name="delete_all_confirm_action">Clear All</string>
+    <string name="all_data_deleted">All parking data cleared</string>
+    <string name="current_spot_cleared">Active parking spot cleared</string>
+    <string name="history_cleared">Parking history cleared</string>
+</resources>
