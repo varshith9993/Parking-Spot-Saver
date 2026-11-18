@@ -210,8 +210,7 @@ class HomeFragment : Fragment() {
             pendingPhotos.clear()
             pendingPhotos.addAll(updated)
             hasUnsavedFormChanges = true
-            isFormSavedToSaved = false
-            formTimestamp = 0L
+            if (formTimestamp <= 0L) formTimestamp = System.currentTimeMillis()
             renderEmptyPhotos()
             renderSheetState(focusMap = false)
         } else {
@@ -436,7 +435,7 @@ class HomeFragment : Fragment() {
             startGpsSaveFlow()
         }
         binding.btnHomeSaveNewSpot.setOnClickListener {
-            saveHomeForm(saveToSavedList = false)
+            saveHomeForm()
         }
         binding.btnEmptyAddPhoto.setOnClickListener {
             showPhotoSourceDialog(forPending = true)
@@ -452,7 +451,7 @@ class HomeFragment : Fragment() {
         binding.btnCancelPinSelection.setOnClickListener { exitPinSelectionMode() }
 
         binding.btnHomeChangeLocation.setOnClickListener { showChangeLocationDialog() }
-        binding.btnHomeSave.setOnClickListener { saveHomeForm(saveToSavedList = true) }
+        binding.btnHomeSave.setOnClickListener { toggleHomeSaveMark() }
         binding.btnHomeEditPlaceLabel.setOnClickListener { editActivePlaceLabel() }
         binding.btnHomeEditNote.setOnClickListener { editActiveNote() }
         binding.btnHomeAddPhoto.setOnClickListener {
@@ -571,8 +570,7 @@ class HomeFragment : Fragment() {
             draftPlaceLabel = enteredLabel
         }
         draftAddress = null
-        formTimestamp = 0L
-        isFormSavedToSaved = false
+        formTimestamp = System.currentTimeMillis()
         hasUnsavedFormChanges = true
 
         exitPinSelectionMode()
@@ -580,8 +578,31 @@ class HomeFragment : Fragment() {
         resolveFormAddressAsync(chosen.latitude, chosen.longitude)
     }
 
-    private fun saveHomeForm(saveToSavedList: Boolean) {
+    private fun toggleHomeSaveMark() {
+        val existing = activeRecord
+        if (existing != null && !hasUnsavedFormChanges) {
+            val nextSaved = !isFormSavedToSaved
+            parkingStorage.setRecordSaved(existing.id, nextSaved)
+            activeRecord = parkingStorage.getActiveRecord()
+            isFormSavedToSaved = nextSaved
+            renderSheetState(focusMap = false)
+            Toast.makeText(
+                requireContext(),
+                if (nextSaved) R.string.bookmark_saved else R.string.bookmark_unsaved,
+                Toast.LENGTH_SHORT
+            ).show()
+            (activity as? MainActivity)?.notifyParkingDataChanged()
+            return
+        }
+
+        isFormSavedToSaved = !isFormSavedToSaved
+        ParkingUiHelper.applyBookmarkIcon(binding.btnHomeSave, isFormSavedToSaved)
+        binding.tvHomeSavedBadge.visibility = if (isFormSavedToSaved) View.VISIBLE else View.GONE
+    }
+
+    private fun saveHomeForm() {
         if (isSaveInProgress) return
+        val saveToSavedList = isFormSavedToSaved
         val selected = draftLatLng
         if (selected == null) {
             pendingShakeConfirmation = false
@@ -591,17 +612,6 @@ class HomeFragment : Fragment() {
         }
         if (!DistanceCalculator.isValidCoordinate(selected.latitude, selected.longitude)) {
             showErrorBanner(getString(R.string.map_load_error))
-            return
-        }
-
-        val existing = activeRecord
-        if (saveToSavedList && existing != null && !hasUnsavedFormChanges) {
-            parkingStorage.setRecordSaved(existing.id, true)
-            activeRecord = parkingStorage.getActiveRecord()
-            isFormSavedToSaved = true
-            renderSheetState(focusMap = false)
-            Toast.makeText(requireContext(), R.string.bookmark_saved, Toast.LENGTH_SHORT).show()
-            (activity as? MainActivity)?.notifyParkingDataChanged()
             return
         }
 
@@ -642,20 +652,11 @@ class HomeFragment : Fragment() {
     }
 
     private fun showChangeLocationDialog() {
-        val options = arrayOf(
-            getString(R.string.use_current_gps),
-            getString(R.string.choose_on_map)
+        ParkingUiHelper.showChangeLocationBottomSheet(
+            context = requireContext(),
+            onUseCurrentGps = { fetchGpsLocationIntoForm(showLoading = true) },
+            onChooseOnMap = { enterPinSelectionMode() }
         )
-        MaterialAlertDialogBuilder(requireContext())
-            .setTitle(R.string.change_location_title)
-            .setItems(options) { _, which ->
-                when (which) {
-                    0 -> fetchGpsLocationIntoForm(showLoading = true)
-                    1 -> enterPinSelectionMode()
-                }
-            }
-            .setNegativeButton(R.string.cancel, null)
-            .show()
     }
 
     private fun fetchGpsLocationIntoForm(showLoading: Boolean) {
@@ -675,8 +676,7 @@ class HomeFragment : Fragment() {
 
                 draftLatLng = LatLng(location.latitude, location.longitude)
                 draftAddress = null
-                formTimestamp = 0L
-                isFormSavedToSaved = false
+                formTimestamp = System.currentTimeMillis()
                 hasUnsavedFormChanges = true
 
                 renderSheetState(focusMap = true)
@@ -1038,8 +1038,7 @@ class HomeFragment : Fragment() {
         ) { updated ->
             draftPlaceLabel = updated?.takeIf { it.isNotBlank() }
             hasUnsavedFormChanges = true
-            isFormSavedToSaved = false
-            formTimestamp = 0L
+            if (formTimestamp <= 0L) formTimestamp = System.currentTimeMillis()
             renderSheetState(focusMap = false)
         }
     }
@@ -1048,8 +1047,7 @@ class HomeFragment : Fragment() {
         ParkingUiHelper.showNoteEditDialog(requireContext(), draftNote) { updated ->
             draftNote = updated?.takeIf { it.isNotBlank() }
             hasUnsavedFormChanges = true
-            isFormSavedToSaved = false
-            formTimestamp = 0L
+            if (formTimestamp <= 0L) formTimestamp = System.currentTimeMillis()
             renderSheetState(focusMap = false)
         }
     }
@@ -1213,8 +1211,7 @@ class HomeFragment : Fragment() {
             }
             pendingPhotos.add(item)
             hasUnsavedFormChanges = true
-            isFormSavedToSaved = false
-            formTimestamp = 0L
+            if (formTimestamp <= 0L) formTimestamp = System.currentTimeMillis()
             renderEmptyPhotos()
             renderSheetState(focusMap = false)
             if (showAddedToast) {
@@ -1280,8 +1277,7 @@ class HomeFragment : Fragment() {
         val removed = pendingPhotos.removeAt(index)
         deleteUnreferencedPhoto(removed.filePath, null)
         hasUnsavedFormChanges = true
-        isFormSavedToSaved = false
-        formTimestamp = 0L
+        if (formTimestamp <= 0L) formTimestamp = System.currentTimeMillis()
         renderEmptyPhotos()
         renderSheetState(focusMap = false)
         Toast.makeText(requireContext(), R.string.photo_removed_confirmation, Toast.LENGTH_SHORT).show()
@@ -1333,8 +1329,10 @@ class HomeFragment : Fragment() {
         draftPlaceLabel = null
         draftNote = null
         clearPendingPhotos()
+        parkingStorage.clearActiveSpot()
         activeRecord = null
-        formTimestamp = 0L
+        stopLiveDistanceUpdates()
+        formTimestamp = System.currentTimeMillis()
         isFormSavedToSaved = false
         hasUnsavedFormChanges = true
 
@@ -1352,6 +1350,7 @@ class HomeFragment : Fragment() {
             fetchGpsLocationIntoForm(showLoading = false)
         }
         Toast.makeText(requireContext(), R.string.home_cleared, Toast.LENGTH_SHORT).show()
+        (activity as? MainActivity)?.notifyParkingDataChanged()
     }
 
     private fun startLiveDistanceUpdates() {

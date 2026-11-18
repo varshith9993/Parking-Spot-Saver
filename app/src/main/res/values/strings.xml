@@ -114,7 +114,7 @@
     <string name="share_unavailable">Unable to share this parking location.</string>
     <string name="delete_saved_title">Remove from Saved?</string>
     <string name="delete_saved_message">Removes this bookmark from Saved. The parking record stays in History.</string>
-    <string name="set_as_active">Set Active on Home</string>
+    <string name="set_as_active">Save Changes</string>
     <string name="set_active_confirmation">Set as active spot on Home</string>
 
     <!-- History Screen -->
@@ -232,6 +232,9 @@
     <string name="take_a_photo">Take a Photo</string>
     <string name="take_a_photo_desc">Capture a photo using the in-app camera</string>
     <string name="choose_from_gallery_desc">Select existing images with Photo Picker</string>
+    <string name="change_location_subtitle">Update the parking location using GPS or by placing a pin on the map.</string>
+    <string name="use_current_gps_desc">Fetch your phone\'s current GPS coordinates</string>
+    <string name="choose_on_map_desc">Move the map to pick an exact spot manually</string>
 
     <string name="theme_system">System</string>
     <string name="theme_light">Light</string>

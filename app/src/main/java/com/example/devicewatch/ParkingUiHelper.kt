@@ -475,4 +475,26 @@ internal object ParkingUiHelper {
         dialog.setContentView(sheetView)
         dialog.show()
     }
+
+    fun showChangeLocationBottomSheet(
+        context: Context,
+        onUseCurrentGps: () -> Unit,
+        onChooseOnMap: () -> Unit
+    ) {
+        val dialog = BottomSheetDialog(context)
+        val sheetView = LayoutInflater.from(context).inflate(R.layout.bottom_sheet_change_location, null)
+        sheetView.findViewById<View>(R.id.cardOptionCurrentGps).setOnClickListener {
+            dialog.dismiss()
+            onUseCurrentGps()
+        }
+        sheetView.findViewById<View>(R.id.cardOptionChooseOnMap).setOnClickListener {
+            dialog.dismiss()
+            onChooseOnMap()
+        }
+        sheetView.findViewById<View>(R.id.btnChangeLocationCancel).setOnClickListener {
+            dialog.dismiss()
+        }
+        dialog.setContentView(sheetView)
+        dialog.show()
+    }
 }

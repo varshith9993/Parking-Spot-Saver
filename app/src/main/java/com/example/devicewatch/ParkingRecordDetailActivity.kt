@@ -208,6 +208,7 @@ class ParkingRecordDetailActivity : AppCompatActivity() {
         )
 
         binding.btnDetailBack.setOnClickListener { finish() }
+        binding.btnDetailTopShare.setOnClickListener { shareCurrentRecord() }
         binding.btnDetailBookmark.setOnClickListener { toggleBookmark() }
         binding.btnDetailZoomIn.setOnClickListener { ParkingUiHelper.zoomIn(mapLibreMap) }
         binding.btnDetailZoomOut.setOnClickListener { ParkingUiHelper.zoomOut(mapLibreMap) }
@@ -222,17 +223,7 @@ class ParkingRecordDetailActivity : AppCompatActivity() {
                 Toast.makeText(this, R.string.no_navigation_app, Toast.LENGTH_SHORT).show()
             }
         }
-        binding.btnDetailShare.setOnClickListener {
-            val active = currentRecord ?: return@setOnClickListener
-            val shared = NavigationManager.shareParkingRecord(
-                this,
-                active,
-                getString(R.string.share_chooser_title)
-            )
-            if (!shared) {
-                Toast.makeText(this, R.string.share_unavailable, Toast.LENGTH_SHORT).show()
-            }
-        }
+        binding.btnDetailShare.setOnClickListener { shareCurrentRecord() }
         binding.btnDetailDelete.setOnClickListener { confirmDeleteOrUnsave() }
 
         if (sourceMode == MODE_SAVED) {
@@ -672,6 +663,18 @@ class ParkingRecordDetailActivity : AppCompatActivity() {
         }
         startActivity(intent)
         finish()
+    }
+
+    private fun shareCurrentRecord() {
+        val active = currentRecord ?: return
+        val shared = NavigationManager.shareParkingRecord(
+            this,
+            active,
+            getString(R.string.share_chooser_title)
+        )
+        if (!shared) {
+            Toast.makeText(this, R.string.share_unavailable, Toast.LENGTH_SHORT).show()
+        }
     }
 
     private fun confirmDeleteOrUnsave() {

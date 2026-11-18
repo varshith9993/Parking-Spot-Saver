@@ -42,6 +42,17 @@
             tools:text="Saved Location" />
 
         <ImageButton
+            android:id="@+id/btnDetailTopShare"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/share"
+            android:padding="10dp"
+            android:scaleType="centerInside"
+            android:src="@drawable/ic_share"
+            app:tint="@color/ps_text_primary" />
+
+        <ImageButton
             android:id="@+id/btnDetailBookmark"
             android:layout_width="44dp"
             android:layout_height="44dp"
@@ -198,6 +209,39 @@
                         android:textAppearance="@style/TextAppearance.Material3.BodySmall"
                         android:textColor="@color/ps_text_secondary"
                         tools:text="12.97160, 77.59460" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:orientation="horizontal">
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnDetailNavigate"
+                            android:layout_width="0dp"
+                            android:layout_height="48dp"
+                            android:layout_marginEnd="6dp"
+                            android:layout_weight="1.4"
+                            android:text="@string/navigate"
+                            android:textAllCaps="false"
+                            android:textColor="@color/ps_on_primary"
+                            app:backgroundTint="@color/ps_primary"
+                            app:cornerRadius="10dp"
+                            app:icon="@drawable/ic_directions"
+                            app:iconTint="@color/ps_on_primary" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnDetailShare"
+                            style="@style/Widget.Material3.Button.OutlinedButton"
+                            android:layout_width="0dp"
+                            android:layout_height="48dp"
+                            android:layout_marginStart="6dp"
+                            android:layout_weight="1"
+                            android:text="@string/share"
+                            android:textAllCaps="false"
+                            app:cornerRadius="10dp"
+                            app:icon="@drawable/ic_share" />
+                    </LinearLayout>
 
                     <View
                         android:layout_width="match_parent"
@@ -516,45 +560,12 @@
             </com.google.android.material.card.MaterialCardView>
 
             <!-- Actions -->
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="14dp"
-                android:orientation="horizontal">
-
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btnDetailNavigate"
-                    android:layout_width="0dp"
-                    android:layout_height="48dp"
-                    android:layout_marginEnd="6dp"
-                    android:layout_weight="1.4"
-                    android:text="@string/navigate"
-                    android:textAllCaps="false"
-                    android:textColor="@color/ps_on_primary"
-                    app:backgroundTint="@color/ps_primary"
-                    app:cornerRadius="10dp"
-                    app:icon="@drawable/ic_directions"
-                    app:iconTint="@color/ps_on_primary" />
-
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btnDetailShare"
-                    style="@style/Widget.Material3.Button.OutlinedButton"
-                    android:layout_width="0dp"
-                    android:layout_height="48dp"
-                    android:layout_marginStart="6dp"
-                    android:layout_weight="1"
-                    android:text="@string/share"
-                    android:textAllCaps="false"
-                    app:cornerRadius="10dp"
-                    app:icon="@drawable/ic_share" />
-            </LinearLayout>
-
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnDetailSetActive"
                 style="@style/Widget.Material3.Button.OutlinedButton"
                 android:layout_width="match_parent"
                 android:layout_height="46dp"
-                android:layout_marginTop="8dp"
+                android:layout_marginTop="14dp"
                 android:text="@string/set_as_active"
                 android:textAllCaps="false"
                 android:visibility="gone"
