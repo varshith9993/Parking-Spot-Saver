@@ -185,7 +185,10 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         ShakeMonitorService.isMainForeground = true
         updateShakeConfigFromSettings()
-        notifyParkingDataChanged()
+        if (ShakeMonitorService.savedSpotInBackground) {
+            ShakeMonitorService.savedSpotInBackground = false
+            notifyParkingDataChanged()
+        }
     }
 
     override fun onPause() {

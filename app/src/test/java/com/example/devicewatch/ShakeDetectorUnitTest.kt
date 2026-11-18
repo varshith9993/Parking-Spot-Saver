@@ -9,12 +9,12 @@ import org.junit.Test
 class ShakeDetectorUnitTest {
 
     @Test
-    fun shortShakeUnderOneAndHalfSecondsDoesNotTrigger() {
+    fun shortShakeUnderOneSecondDoesNotTrigger() {
         var triggers = 0
         val detector = ShakeDetector { triggers++ }
 
         var t = 1_000L
-        repeat(6) {
+        repeat(5) {
             assertFalse(detector.processSample(2.5, t))
             t += 200L
         }
@@ -22,36 +22,36 @@ class ShakeDetectorUnitTest {
     }
 
     @Test
-    fun continuousOneAndHalfSecondShakeTriggersOnceAndEnforcesTenSecondCooldown() {
+    fun continuousOneSecondShakeTriggersOnceAndEnforcesTenSecondCooldown() {
         var triggers = 0
         val detector = ShakeDetector { triggers++ }
 
         val start = 10_000L
         var t = start
-        while (t < start + 1_500L) {
+        while (t < start + 1_000L) {
             assertFalse(detector.processSample(2.4, t))
             t += 200L
         }
-        // Cross >= 1500ms with >= 5 impulses
-        assertTrue(detector.processSample(2.4, start + 1_600L))
+        // Cross >= 1000ms with >= 4 impulses
+        assertTrue(detector.processSample(2.4, start + 1_000L))
         assertEquals(1, triggers)
 
         // Ongoing violent shake during the 10-second cooldown must be ignored
-        t = start + 2_000L
-        while (t < start + 11_500L) {
+        t = start + 1_400L
+        while (t < start + 10_900L) {
             assertFalse(detector.processSample(3.0, t))
             t += 200L
         }
         assertEquals(1, triggers)
 
-        // New continuous >= 1.5s shake AFTER cooldown expires triggers again
-        val secondStart = start + 12_000L
+        // New continuous >= 1.0s shake AFTER cooldown expires triggers again
+        val secondStart = start + 11_200L
         t = secondStart
-        while (t < secondStart + 1_500L) {
+        while (t < secondStart + 1_000L) {
             assertFalse(detector.processSample(2.4, t))
             t += 200L
         }
-        assertTrue(detector.processSample(2.4, secondStart + 1_600L))
+        assertTrue(detector.processSample(2.4, secondStart + 1_000L))
         assertEquals(2, triggers)
     }
 

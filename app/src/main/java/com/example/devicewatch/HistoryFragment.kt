@@ -55,12 +55,18 @@ class HistoryFragment : Fragment() {
 
     private var allRecords: List<ParkingRecord> = emptyList()
     private var currentQuery: String = ""
+    private var lastGroupedDayOfYear: Int = -1
 
     private val relativeTimeHandler = Handler(Looper.getMainLooper())
     private val relativeTimeTickRunnable = object : Runnable {
         override fun run() {
-            if (_binding != null && isAdded && !isHidden) {
-                applyFilterAndRender()
+            if (_binding != null && isAdded && !isHidden && ::adapter.isInitialized) {
+                val todayKey = currentDayKey()
+                if (todayKey != lastGroupedDayOfYear) {
+                    applyFilterAndRender()
+                } else {
+                    adapter.notifyDataSetChanged()
+                }
                 relativeTimeHandler.postDelayed(this, RELATIVE_TIME_REFRESH_MS)
             }
         }
@@ -216,6 +222,7 @@ class HistoryFragment : Fragment() {
             return
         }
 
+        lastGroupedDayOfYear = currentDayKey()
         val rows = HistoryDateGrouper.buildGroupedRows(
             filtered,
             System.currentTimeMillis(),
@@ -236,6 +243,11 @@ class HistoryFragment : Fragment() {
         val coords = NativeGeocoder.formatCoordinates(record.latitude, record.longitude)
             .lowercase(locale)
         return coords.contains(needle)
+    }
+
+    private fun currentDayKey(): Int {
+        val cal = java.util.Calendar.getInstance()
+        return cal.get(java.util.Calendar.YEAR) * 400 + cal.get(java.util.Calendar.DAY_OF_YEAR)
     }
 
     private fun startRelativeTimeTicker() {
@@ -349,8 +361,8 @@ class HistoryFragment : Fragment() {
 
     override fun onResume() {
         super.onResume()
-        refreshData()
         if (!isHidden) {
+            refreshData()
             startRelativeTimeTicker()
         }
     }

@@ -17,6 +17,11 @@ class ParkingPhotoAdapter(
     private var items: List<ParkingPhotoItem> = emptyList()
 
     fun submitList(newItems: List<ParkingPhotoItem>) {
+        if (items.size == newItems.size &&
+            items.indices.all { idx -> items[idx].filePath == newItems[idx].filePath }
+        ) {
+            return
+        }
         items = newItems.toList()
         notifyDataSetChanged()
     }
@@ -41,18 +46,22 @@ class ParkingPhotoAdapter(
     ) : RecyclerView.ViewHolder(binding.root) {
 
         fun bind(item: ParkingPhotoItem, position: Int) {
-            binding.ivPhotoThumb.tag = item.filePath
-            binding.ivPhotoThumb.setImageDrawable(null)
-            binding.tvPhotoThumbMissing.visibility = View.GONE
+            val samePhotoLoaded = binding.ivPhotoThumb.tag == item.filePath &&
+                binding.ivPhotoThumb.drawable != null
+            if (!samePhotoLoaded) {
+                binding.ivPhotoThumb.tag = item.filePath
+                binding.ivPhotoThumb.setImageDrawable(null)
+                binding.tvPhotoThumbMissing.visibility = View.GONE
 
-            photoManager.loadSampledBitmap(item.filePath, THUMB_REQ_SIZE, THUMB_REQ_SIZE) { bitmap ->
-                if (binding.ivPhotoThumb.tag != item.filePath) return@loadSampledBitmap
-                if (bitmap != null) {
-                    binding.ivPhotoThumb.setImageBitmap(bitmap)
-                    binding.tvPhotoThumbMissing.visibility = View.GONE
-                } else {
-                    binding.ivPhotoThumb.setImageDrawable(null)
-                    binding.tvPhotoThumbMissing.visibility = View.VISIBLE
+                photoManager.loadSampledBitmap(item.filePath, THUMB_REQ_SIZE, THUMB_REQ_SIZE) { bitmap ->
+                    if (binding.ivPhotoThumb.tag != item.filePath) return@loadSampledBitmap
+                    if (bitmap != null) {
+                        binding.ivPhotoThumb.setImageBitmap(bitmap)
+                        binding.tvPhotoThumbMissing.visibility = View.GONE
+                    } else {
+                        binding.ivPhotoThumb.setImageDrawable(null)
+                        binding.tvPhotoThumbMissing.visibility = View.VISIBLE
+                    }
                 }
             }
 

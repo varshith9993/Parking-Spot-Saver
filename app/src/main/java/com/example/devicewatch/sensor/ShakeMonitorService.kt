@@ -41,6 +41,9 @@ class ShakeMonitorService : Service() {
         @Volatile
         var isMainForeground: Boolean = false
 
+        @Volatile
+        var savedSpotInBackground: Boolean = false
+
         fun start(context: Context) {
             val appCtx = context.applicationContext
             val intent = Intent(appCtx, ShakeMonitorService::class.java).apply {
@@ -69,6 +72,8 @@ class ShakeMonitorService : Service() {
     private val mainHandler = Handler(Looper.getMainLooper())
     private var isSaveInFlight = false
     private var isForegroundStarted = false
+    @Volatile
+    private var isServiceDestroyed = false
 
     override fun onCreate() {
         super.onCreate()
@@ -143,11 +148,16 @@ class ShakeMonitorService : Service() {
         isSaveInFlight = true
         locationManager.getFastLocation(object : ParkingLocationManager.LocationResultCallback {
             override fun onLocationRetrieved(location: Location) {
+                if (isServiceDestroyed) {
+                    isSaveInFlight = false
+                    return
+                }
                 saveShakeSpot(location)
             }
 
             override fun onLocationError(message: String) {
                 isSaveInFlight = false
+                if (isServiceDestroyed) return
                 showToastOnMain(getString(R.string.shake_failed_notif_text))
                 postSavedAlertNotification(
                     getString(R.string.shake_notif_title),
@@ -158,6 +168,7 @@ class ShakeMonitorService : Service() {
     }
 
     private fun saveShakeSpot(location: Location) {
+        if (isServiceDestroyed) return
         val record = ParkingRecord(
             UUID.randomUUID().toString(),
             location.latitude,
@@ -170,6 +181,7 @@ class ShakeMonitorService : Service() {
             false
         )
         parkingStorage.saveNewActiveRecord(record)
+        savedSpotInBackground = true
         isSaveInFlight = false
 
         val coords = NativeGeocoder.formatCoordinates(record.latitude, record.longitude)
@@ -184,6 +196,7 @@ class ShakeMonitorService : Service() {
             record.longitude,
             object : NativeGeocoder.GeocodeCallback {
                 override fun onSuccess(formattedAddress: String) {
+                    if (isServiceDestroyed) return
                     parkingStorage.updateRecordAddress(record.id, formattedAddress)
                     postSavedAlertNotification(
                         getString(R.string.shake_saved_notif_title),
@@ -259,6 +272,7 @@ class ShakeMonitorService : Service() {
     }
 
     override fun onDestroy() {
+        isServiceDestroyed = true
         isForegroundStarted = false
         if (::shakeDetector.isInitialized) {
             shakeDetector.stop()

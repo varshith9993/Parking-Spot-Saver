@@ -104,6 +104,7 @@ class HomeFragment : Fragment() {
     private var isFormSavedToSaved = false
     private var hasUnsavedFormChanges = false
     private var isAutoDefaultGpsLocation = false
+    private var skipInitialResumeRender = false
 
     private val pendingPhotos: MutableList<ParkingPhotoItem> = mutableListOf()
     private var photoTargetIsPending: Boolean = false
@@ -299,6 +300,7 @@ class HomeFragment : Fragment() {
             populateDefaultGpsOrFetch()
         }
         renderSheetState(focusMap = true)
+        skipInitialResumeRender = true
         if (isAutoDefaultGpsLocation && draftLatLng != null && draftAddress.isNullOrBlank()) {
             val target = draftLatLng!!
             resolveFormAddressAsync(target.latitude, target.longitude)
@@ -1333,17 +1335,6 @@ class HomeFragment : Fragment() {
         photoViewerLauncher.launch(intent)
     }
 
-    private fun openActivePhotoViewer(index: Int) {
-        val record = activeRecord ?: return
-        if (record.photos.isEmpty()) return
-        val intent = Intent(requireContext(), PhotoViewerActivity::class.java).apply {
-            putExtra(PhotoViewerActivity.EXTRA_RECORD_ID, record.id)
-            putExtra(PhotoViewerActivity.EXTRA_INITIAL_INDEX, index)
-            putExtra(PhotoViewerActivity.EXTRA_EDITABLE, true)
-        }
-        photoViewerLauncher.launch(intent)
-    }
-
     private fun removePendingPhotoAt(index: Int) {
         if (index !in pendingPhotos.indices) return
         val removed = pendingPhotos.removeAt(index)
@@ -1352,25 +1343,6 @@ class HomeFragment : Fragment() {
         if (formTimestamp <= 0L) formTimestamp = System.currentTimeMillis()
         renderSheetState(focusMap = false)
         Toast.makeText(requireContext(), R.string.photo_removed_confirmation, Toast.LENGTH_SHORT).show()
-    }
-
-    private fun removeActivePhotoAt(index: Int) {
-        val record = activeRecord ?: return
-        MaterialAlertDialogBuilder(requireContext())
-            .setTitle(R.string.remove_single_photo_title)
-            .setMessage(R.string.remove_single_photo_message)
-            .setNegativeButton(R.string.cancel, null)
-            .setPositiveButton(R.string.remove) { _, _ ->
-                val removed = parkingStorage.removePhotoFromRecord(record.id, index)
-                if (removed != null) {
-                    deleteUnreferencedPhoto(removed.filePath, null)
-                }
-                activeRecord = parkingStorage.getActiveRecord()
-                renderSheetState(focusMap = false)
-                Toast.makeText(requireContext(), R.string.photo_removed_confirmation, Toast.LENGTH_SHORT).show()
-                (activity as? MainActivity)?.notifyParkingDataChanged()
-            }
-            .show()
     }
 
     private fun clearPendingPhotos() {
@@ -1548,7 +1520,7 @@ class HomeFragment : Fragment() {
                 activateLocationPuckIfReady()
                 startLiveDistanceUpdates()
             }
-            if (activeRecord != null) startElapsedTimer()
+            if (formTimestamp > 0L || activeRecord != null) startElapsedTimer()
         }
     }
 
@@ -1560,7 +1532,7 @@ class HomeFragment : Fragment() {
                 activateLocationPuckIfReady()
                 startLiveDistanceUpdates()
             }
-            if (activeRecord != null) startElapsedTimer()
+            if (formTimestamp > 0L || activeRecord != null) startElapsedTimer()
         }
     }
 
@@ -1568,12 +1540,15 @@ class HomeFragment : Fragment() {
         super.onResume()
         mapView?.onResume()
         if (!::parkingStorage.isInitialized || !::locationManager.isInitialized) return
-        activeRecord = parkingStorage.getActiveRecord()
-        if (!isPinSelectionMode) {
-            renderSheetState(focusMap = false)
-        }
-        if (locationManager.hasLocationPermission()) {
-            activateLocationPuckIfReady()
+        val skipRender = skipInitialResumeRender
+        skipInitialResumeRender = false
+        if (!isHidden) {
+            if (!skipRender) {
+                refreshFromStorage(focusMap = false)
+            }
+            if (locationManager.hasLocationPermission()) {
+                activateLocationPuckIfReady()
+            }
         }
     }
 

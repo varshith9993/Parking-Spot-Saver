@@ -254,8 +254,8 @@ class SavedLocationsFragment : Fragment() {
 
     override fun onResume() {
         super.onResume()
-        refreshData()
         if (!isHidden) {
+            refreshData()
             startRelativeTimeTicker()
         }
     }
