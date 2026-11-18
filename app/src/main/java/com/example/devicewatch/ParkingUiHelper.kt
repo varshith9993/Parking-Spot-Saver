@@ -497,4 +497,28 @@ internal object ParkingUiHelper {
         dialog.setContentView(sheetView)
         dialog.show()
     }
+
+    fun buildFallbackGalleryIntent(allowMultiple: Boolean): Intent {
+        return Intent(Intent.ACTION_GET_CONTENT).apply {
+            type = "image/*"
+            addCategory(Intent.CATEGORY_OPENABLE)
+            putExtra(Intent.EXTRA_ALLOW_MULTIPLE, allowMultiple)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+    }
+
+    fun extractPickedImageUris(data: Intent?): List<Uri> {
+        if (data == null) return emptyList()
+        val result = mutableListOf<Uri>()
+        val clipData = data.clipData
+        if (clipData != null) {
+            for (i in 0 until clipData.itemCount) {
+                clipData.getItemAt(i)?.uri?.let { result.add(it) }
+            }
+        }
+        if (result.isEmpty()) {
+            data.data?.let { result.add(it) }
+        }
+        return result
+    }
 }

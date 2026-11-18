@@ -42,7 +42,10 @@ class SettingsFragment : Fragment() {
     ) {
         askedLocationInSession = true
         refreshState()
-        (activity as? MainActivity)?.notifyParkingDataChanged()
+        (activity as? MainActivity)?.apply {
+            notifyParkingDataChanged()
+            updateShakeConfigFromSettings()
+        }
     }
 
     private val cameraPermissionLauncher = registerForActivityResult(
@@ -113,6 +116,14 @@ class SettingsFragment : Fragment() {
             if (isUpdatingControls) return@setOnCheckedChangeListener
             parkingStorage.setShakeToSaveEnabled(isChecked)
             binding.layoutSettingsShakeSensitivity.visibility = if (isChecked) View.VISIBLE else View.GONE
+            if (isChecked) {
+                val hasLoc = isGranted(Manifest.permission.ACCESS_FINE_LOCATION) ||
+                    isGranted(Manifest.permission.ACCESS_COARSE_LOCATION)
+                if (!hasLoc) {
+                    Toast.makeText(requireContext(), R.string.shake_bg_location_needed, Toast.LENGTH_LONG).show()
+                }
+                (activity as? MainActivity)?.requestNotificationPermissionIfNeeded()
+            }
             (activity as? MainActivity)?.updateShakeConfigFromSettings()
         }
 

@@ -2,7 +2,6 @@ package com.example.devicewatch
 
 import android.Manifest
 import android.app.Activity
-import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -127,6 +126,18 @@ class ParkingRecordDetailActivity : AppCompatActivity() {
     ) { uris ->
         if (isFinishing || isDestroyed || uris.isEmpty()) return@registerForActivityResult
         importSelectedGalleryUris(uris)
+    }
+
+    private val fallbackGalleryLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (isFinishing || isDestroyed || result.resultCode != RESULT_OK) {
+            return@registerForActivityResult
+        }
+        val uris = ParkingUiHelper.extractPickedImageUris(result.data)
+        if (uris.isNotEmpty()) {
+            importSelectedGalleryUris(uris)
+        }
     }
 
     private val photoViewerLauncher = registerForActivityResult(
@@ -455,8 +466,14 @@ class ParkingRecordDetailActivity : AppCompatActivity() {
             } else {
                 pickMultipleMediaLauncher.launch(request)
             }
-        } catch (_: ActivityNotFoundException) {
-            Toast.makeText(this, R.string.photo_picker_unavailable, Toast.LENGTH_SHORT).show()
+        } catch (_: Exception) {
+            try {
+                fallbackGalleryLauncher.launch(
+                    ParkingUiHelper.buildFallbackGalleryIntent(allowMultiple = remainingSlots > 1)
+                )
+            } catch (_: Exception) {
+                Toast.makeText(this, R.string.photo_picker_unavailable, Toast.LENGTH_SHORT).show()
+            }
         }
     }
 

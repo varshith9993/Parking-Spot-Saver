@@ -10,7 +10,7 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
 /**
- * Foreground-only accelerometer shake detector requiring sustained continuous shaking (>= 1.5s)
+ * Accelerometer shake detector requiring sustained continuous shaking (>= 1.0s)
  * before triggering, followed by a strict 10-second cooldown that ignores ongoing shakes.
  */
 public class ShakeDetector implements SensorEventListener {
@@ -24,9 +24,9 @@ public class ShakeDetector implements SensorEventListener {
 
     private static final float NORMAL_G_THRESHOLD = 2.0f;
     private static final float HIGH_G_THRESHOLD = 1.6f;
-    private static final long REQUIRED_SHAKE_DURATION_MS = 1500L;
-    private static final int NORMAL_MIN_IMPULSES = 5;
-    private static final int HIGH_MIN_IMPULSES = 4;
+    private static final long REQUIRED_SHAKE_DURATION_MS = 1000L;
+    private static final int NORMAL_MIN_IMPULSES = 4;
+    private static final int HIGH_MIN_IMPULSES = 3;
     private static final long MIN_IMPULSE_GAP_MS = 100L;
     private static final long MAX_PAUSE_BETWEEN_IMPULSES_MS = 450L;
     private static final long COOLDOWN_MS = 10_000L;
@@ -106,7 +106,7 @@ public class ShakeDetector implements SensorEventListener {
 
     /**
      * Evaluates a single normalized G-force sample at {@code nowMs}.
-     * Returns true when a continuous 1.5s shake triggers outside the 10s cooldown.
+     * Returns true when a continuous 1.0s shake triggers outside the 10s cooldown.
      */
     public boolean processSample(double gForce, long nowMs) {
         // Ignore all accelerometer spikes while 10s cooldown is active.

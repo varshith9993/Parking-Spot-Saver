@@ -172,13 +172,21 @@
     <string name="open_device_location_settings">Open Device Location Settings</string>
 
     <string name="shake_title">Shake to Save</string>
-    <string name="shake_desc">Requires 1.5s of continuous shaking while the app is open (10s cooldown) to save your current GPS spot without bookmarking.</string>
+    <string name="shake_desc">Requires 1s of continuous shaking (10s cooldown) to save your current GPS spot to History, even in the background when enabled.</string>
     <string name="shake_unavailable">Accelerometer unavailable on this device.</string>
     <string name="shake_sensitivity_label">Sensitivity</string>
     <string name="shake_sensitivity_normal">Normal</string>
     <string name="shake_sensitivity_high">High</string>
     <string name="shake_saved_confirmation">Shake detected — parking location saved</string>
     <string name="shake_detecting_gps">Shake detected — acquiring GPS…</string>
+    <string name="shake_service_channel_name">Background Shake Detection</string>
+    <string name="shake_alert_channel_name">Shake Spot Saved Alerts</string>
+    <string name="shake_notif_title">Shake to Save active</string>
+    <string name="shake_notif_text">Shake continuously for 1s to save your parking location.</string>
+    <string name="shake_saved_notif_title">Parking spot saved to History</string>
+    <string name="shake_saved_notif_text">Saved at %1$s</string>
+    <string name="shake_failed_notif_text">Shake detected, but GPS location was unavailable.</string>
+    <string name="shake_bg_location_needed">Grant location permission so background Shake to Save can record your spot.</string>
 
     <!-- Multi-Photo, Camera & Explicit Save -->
     <string name="parking_photos_count_format">Photos (%1$d / %2$d)</string>

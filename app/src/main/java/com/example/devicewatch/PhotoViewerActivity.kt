@@ -81,6 +81,21 @@ class PhotoViewerActivity : AppCompatActivity() {
         ActivityResultContracts.PickVisualMedia()
     ) { uri ->
         if (isFinishing || isDestroyed || uri == null) return@registerForActivityResult
+        importReplacementGalleryUri(uri)
+    }
+
+    private val fallbackReplaceGalleryLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (isFinishing || isDestroyed || result.resultCode != RESULT_OK) {
+            return@registerForActivityResult
+        }
+        val uri = ParkingUiHelper.extractPickedImageUris(result.data).firstOrNull()
+            ?: return@registerForActivityResult
+        importReplacementGalleryUri(uri)
+    }
+
+    private fun importReplacementGalleryUri(uri: android.net.Uri) {
         setBusy(true)
         photoManager.importGalleryPhoto(
             uri,
@@ -235,7 +250,13 @@ class PhotoViewerActivity : AppCompatActivity() {
                         PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
                     )
                 } catch (_: Exception) {
-                    Toast.makeText(this, R.string.photo_picker_unavailable, Toast.LENGTH_SHORT).show()
+                    try {
+                        fallbackReplaceGalleryLauncher.launch(
+                            ParkingUiHelper.buildFallbackGalleryIntent(allowMultiple = false)
+                        )
+                    } catch (_: Exception) {
+                        Toast.makeText(this, R.string.photo_picker_unavailable, Toast.LENGTH_SHORT).show()
+                    }
                 }
             }
         )

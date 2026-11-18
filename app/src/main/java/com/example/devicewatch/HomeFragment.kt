@@ -2,7 +2,6 @@ package com.example.devicewatch
 
 import android.Manifest
 import android.app.Activity
-import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.location.Location
@@ -65,6 +64,11 @@ class HomeFragment : Fragment() {
         private const val KEY_DRAFT_LABEL = "key_draft_label"
         private const val KEY_DRAFT_ADDRESS = "key_draft_address"
         private const val KEY_DRAFT_NOTE = "key_draft_note"
+        private const val KEY_FORM_TIMESTAMP = "key_form_timestamp"
+        private const val KEY_FORM_SAVED = "key_form_saved"
+        private const val KEY_FORM_DIRTY = "key_form_dirty"
+        private const val KEY_PHOTO_TARGET_PENDING = "key_photo_target_pending"
+        private const val KEY_PHOTO_TARGET_RECORD_ID = "key_photo_target_record_id"
     }
 
     private var _binding: FragmentHomeBinding? = null
@@ -75,7 +79,6 @@ class HomeFragment : Fragment() {
     private lateinit var locationManager: ParkingLocationManager
     private lateinit var nativeGeocoder: NativeGeocoder
     private lateinit var bottomSheetBehavior: BottomSheetBehavior<LinearLayout>
-    private lateinit var emptyPhotoAdapter: ParkingPhotoAdapter
     private lateinit var activePhotoAdapter: ParkingPhotoAdapter
 
     private var mapView: MapView? = null
@@ -100,6 +103,7 @@ class HomeFragment : Fragment() {
     private var formTimestamp: Long = 0L
     private var isFormSavedToSaved = false
     private var hasUnsavedFormChanges = false
+    private var isAutoDefaultGpsLocation = false
 
     private val pendingPhotos: MutableList<ParkingPhotoItem> = mutableListOf()
     private var photoTargetIsPending: Boolean = false
@@ -109,7 +113,8 @@ class HomeFragment : Fragment() {
     private val elapsedRefreshRunnable = object : Runnable {
         override fun run() {
             if (_binding != null && isAdded) {
-                activeRecord?.let { updateTimestampViews(it.savedTimestamp) }
+                val ts = if (formTimestamp > 0L) formTimestamp else activeRecord?.savedTimestamp ?: 0L
+                if (ts > 0L) updateTimestampViews(ts)
                 elapsedHandler.postDelayed(this, ELAPSED_REFRESH_MS)
             }
         }
@@ -131,7 +136,10 @@ class HomeFragment : Fragment() {
                 PendingPermissionAction.SAVE_GPS_SPOT -> verifyGpsAndSaveSpot()
                 PendingPermissionAction.CENTER_MY_LOCATION -> centerMapOnUserLocation()
                 PendingPermissionAction.NONE -> {
-                    if (activeRecord != null) startLiveDistanceUpdates()
+                    startLiveDistanceUpdates()
+                    if (draftLatLng == null && activeRecord == null) {
+                        loadInitialDefaultLocation()
+                    }
                 }
             }
         } else {
@@ -196,6 +204,18 @@ class HomeFragment : Fragment() {
         importSelectedGalleryUris(uris)
     }
 
+    private val fallbackGalleryLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (!isAdded || _binding == null || result.resultCode != Activity.RESULT_OK) {
+            return@registerForActivityResult
+        }
+        val uris = ParkingUiHelper.extractPickedImageUris(result.data)
+        if (uris.isNotEmpty()) {
+            importSelectedGalleryUris(uris)
+        }
+    }
+
     private val photoViewerLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -211,7 +231,6 @@ class HomeFragment : Fragment() {
             pendingPhotos.addAll(updated)
             hasUnsavedFormChanges = true
             if (formTimestamp <= 0L) formTimestamp = System.currentTimeMillis()
-            renderEmptyPhotos()
             renderSheetState(focusMap = false)
         } else {
             activeRecord = parkingStorage.getActiveRecord()
@@ -259,6 +278,11 @@ class HomeFragment : Fragment() {
                     draftNote = state.getString(KEY_DRAFT_NOTE)
                 }
             }
+            formTimestamp = state.getLong(KEY_FORM_TIMESTAMP, 0L)
+            isFormSavedToSaved = state.getBoolean(KEY_FORM_SAVED, false)
+            hasUnsavedFormChanges = state.getBoolean(KEY_FORM_DIRTY, false)
+            photoTargetIsPending = state.getBoolean(KEY_PHOTO_TARGET_PENDING, true)
+            photoTargetRecordId = state.getString(KEY_PHOTO_TARGET_RECORD_ID)
         }
 
         bottomSheetBehavior = BottomSheetBehavior.from(binding.homeBottomSheet)
@@ -270,11 +294,19 @@ class HomeFragment : Fragment() {
         activeRecord = parkingStorage.getActiveRecord()
         if (draftLatLng == null && activeRecord != null) {
             populateFormFromRecord(activeRecord)
+        } else if (draftLatLng == null) {
+            formTimestamp = System.currentTimeMillis()
+            populateDefaultGpsOrFetch()
         }
         renderSheetState(focusMap = true)
+        if (isAutoDefaultGpsLocation && draftLatLng != null && draftAddress.isNullOrBlank()) {
+            val target = draftLatLng!!
+            resolveFormAddressAsync(target.latitude, target.longitude)
+        }
     }
 
     private fun populateFormFromRecord(record: ParkingRecord?) {
+        isAutoDefaultGpsLocation = false
         if (record == null) {
             draftLatLng = null
             draftPlaceLabel = null
@@ -298,15 +330,6 @@ class HomeFragment : Fragment() {
     }
 
     private fun setupPhotoAdapters() {
-        emptyPhotoAdapter = ParkingPhotoAdapter(
-            photoManager = photoManager,
-            onPhotoClick = { index, _ -> openPendingPhotoViewer(index) },
-            onRemoveClick = { index, _ -> removePendingPhotoAt(index) }
-        )
-        binding.rvEmptyPhotos.layoutManager =
-            LinearLayoutManager(requireContext(), LinearLayoutManager.HORIZONTAL, false)
-        binding.rvEmptyPhotos.adapter = emptyPhotoAdapter
-
         activePhotoAdapter = ParkingPhotoAdapter(
             photoManager = photoManager,
             onPhotoClick = { index, _ -> openPendingPhotoViewer(index) },
@@ -389,6 +412,15 @@ class HomeFragment : Fragment() {
                         )
                     } else if (record != null) {
                         ParkingUiHelper.showRecordOnMap(map, true, record, animateCamera = true)
+                    } else if (latestUserLocation != null) {
+                        val loc = latestUserLocation!!
+                        ParkingUiHelper.showCoordinatesOnMap(
+                            map,
+                            true,
+                            loc.latitude,
+                            loc.longitude,
+                            animateCamera = true
+                        )
                     } else if (locationManager.hasLocationPermission()) {
                         centerMapOnUserLocation(silent = true)
                     }
@@ -429,19 +461,9 @@ class HomeFragment : Fragment() {
             if (isPinSelectionMode) exitPinSelectionMode() else enterPinSelectionMode()
         }
 
-        binding.btnSaveGpsSpot.setOnClickListener {
-            pendingShakeConfirmation = false
-            pendingSaveToSavedList = false
-            startGpsSaveFlow()
-        }
         binding.btnHomeSaveNewSpot.setOnClickListener {
             saveHomeForm()
         }
-        binding.btnEmptyAddPhoto.setOnClickListener {
-            showPhotoSourceDialog(forPending = true)
-        }
-        binding.btnEmptyClearAll.setOnClickListener { confirmClearHomeForm() }
-        binding.btnChooseOnMapEmpty.setOnClickListener { enterPinSelectionMode() }
         binding.btnBannerManualPin.setOnClickListener {
             hideBanner()
             enterPinSelectionMode()
@@ -471,12 +493,79 @@ class HomeFragment : Fragment() {
 
     fun refreshFromStorage(focusMap: Boolean) {
         if (!isAdded || _binding == null || !::parkingStorage.isInitialized) return
-        activeRecord = parkingStorage.getActiveRecord()
-        if (!hasUnsavedFormChanges) {
-            populateFormFromRecord(activeRecord)
+        val previousActiveId = activeRecord?.id
+        val nextActive = parkingStorage.getActiveRecord()
+        activeRecord = nextActive
+        if (nextActive != null) {
+            if (!hasUnsavedFormChanges && (nextActive.id != previousActiveId || !isAutoDefaultGpsLocation)) {
+                populateFormFromRecord(nextActive)
+            } else if (nextActive.id == previousActiveId) {
+                isFormSavedToSaved = nextActive.isSaved
+            }
+        } else if (previousActiveId != null) {
+            populateFormFromRecord(null)
+            formTimestamp = System.currentTimeMillis()
+            populateDefaultGpsOrFetch()
         }
         if (!isPinSelectionMode) {
             renderSheetState(focusMap = focusMap)
+            if (isAutoDefaultGpsLocation && draftLatLng != null && draftAddress.isNullOrBlank()) {
+                val target = draftLatLng!!
+                resolveFormAddressAsync(target.latitude, target.longitude)
+            }
+        }
+    }
+
+    private fun populateDefaultGpsOrFetch() {
+        if (!locationManager.hasLocationPermission()) return
+        val syncLocation = latestUserLocation ?: locationManager.getLastKnownLocationSync()
+        if (syncLocation != null) {
+            latestUserLocation = syncLocation
+            draftLatLng = LatLng(syncLocation.latitude, syncLocation.longitude)
+            draftAddress = null
+            isAutoDefaultGpsLocation = true
+        } else {
+            loadInitialDefaultLocation()
+        }
+    }
+
+    private fun loadInitialDefaultLocation() {
+        locationManager.getFastLocation(object : ParkingLocationManager.LocationResultCallback {
+            override fun onLocationRetrieved(location: Location) {
+                if (!isAdded || _binding == null) return
+                latestUserLocation = location
+                ParkingUiHelper.updateUserLocationPuck(mapLibreMap, location)
+                if (draftLatLng == null && activeRecord == null) {
+                    draftLatLng = LatLng(location.latitude, location.longitude)
+                    draftAddress = null
+                    isAutoDefaultGpsLocation = true
+                    if (formTimestamp <= 0L) formTimestamp = System.currentTimeMillis()
+                    renderSheetState(focusMap = true)
+                    resolveFormAddressAsync(location.latitude, location.longitude)
+                }
+            }
+
+            override fun onLocationError(message: String) {
+                if (!isAdded || _binding == null) return
+                if (draftLatLng == null && activeRecord == null) {
+                    centerMapOnUserLocation(silent = true)
+                }
+            }
+        })
+    }
+
+    private fun applyAutoDefaultLocationIfNeeded(location: Location) {
+        val shouldApplyInitial = draftLatLng == null && activeRecord == null
+        val shouldRefineCachedDefault = isAutoDefaultGpsLocation && activeRecord == null && !hasUnsavedFormChanges
+        if (shouldApplyInitial || shouldRefineCachedDefault) {
+            draftLatLng = LatLng(location.latitude, location.longitude)
+            draftAddress = null
+            isAutoDefaultGpsLocation = false
+            if (formTimestamp <= 0L) formTimestamp = System.currentTimeMillis()
+            renderSheetState(focusMap = true)
+            resolveFormAddressAsync(location.latitude, location.longitude)
+        } else {
+            updateDistanceUI()
         }
     }
 
@@ -503,9 +592,7 @@ class HomeFragment : Fragment() {
                         ParkingUiHelper.MAP_DEFAULT_ZOOM
                     )
                 )
-                if (draftLatLng != null || activeRecord != null) {
-                    updateDistanceUI()
-                }
+                applyAutoDefaultLocationIfNeeded(location)
             }
 
             override fun onLocationError(message: String) {
@@ -521,7 +608,6 @@ class HomeFragment : Fragment() {
         binding.ivCenterCrosshair.visibility = View.VISIBLE
         binding.cardPinCoordsPill.visibility = View.VISIBLE
         binding.layoutPinSelectActions.visibility = View.VISIBLE
-        binding.layoutHomeEmpty.visibility = View.GONE
         binding.layoutHomeActiveSpot.visibility = View.GONE
         binding.cardPinDropControl.setCardBackgroundColor(
             ContextCompat.getColor(requireContext(), R.color.ps_primary_container)
@@ -570,6 +656,7 @@ class HomeFragment : Fragment() {
             draftPlaceLabel = enteredLabel
         }
         draftAddress = null
+        isAutoDefaultGpsLocation = false
         formTimestamp = System.currentTimeMillis()
         hasUnsavedFormChanges = true
 
@@ -676,6 +763,7 @@ class HomeFragment : Fragment() {
 
                 draftLatLng = LatLng(location.latitude, location.longitude)
                 draftAddress = null
+                isAutoDefaultGpsLocation = false
                 formTimestamp = System.currentTimeMillis()
                 hasUnsavedFormChanges = true
 
@@ -866,18 +954,7 @@ class HomeFragment : Fragment() {
         if (isPinSelectionMode) return
 
         val formLocation = draftLatLng ?: activeRecord?.let { LatLng(it.latitude, it.longitude) }
-        if (formLocation == null) {
-            binding.layoutHomeEmpty.visibility = View.VISIBLE
-            binding.layoutHomeActiveSpot.visibility = View.GONE
-            binding.layoutPinSelectActions.visibility = View.GONE
-            renderEmptyPhotos()
-            ParkingUiHelper.clearMapMarker(mapLibreMap)
-            stopElapsedTimer()
-            bottomSheetBehavior.state = BottomSheetBehavior.STATE_COLLAPSED
-            return
-        }
 
-        binding.layoutHomeEmpty.visibility = View.GONE
         binding.layoutHomeActiveSpot.visibility = View.VISIBLE
         binding.layoutPinSelectActions.visibility = View.GONE
 
@@ -896,14 +973,25 @@ class HomeFragment : Fragment() {
             binding.btnHomeEditPlaceLabel.setText(R.string.add_place_label)
         }
 
-        val address = draftAddress
-        binding.tvHomeAddress.text = if (!address.isNullOrBlank()) {
-            address
+        if (formLocation != null) {
+            val address = draftAddress
+            binding.tvHomeAddress.text = if (!address.isNullOrBlank()) {
+                address
+            } else {
+                getString(R.string.resolving_address)
+            }
+            binding.tvHomeCoordinates.text =
+                NativeGeocoder.formatCoordinates(formLocation.latitude, formLocation.longitude)
         } else {
-            getString(R.string.resolving_address)
+            binding.tvHomeAddress.setText(
+                if (::locationManager.isInitialized && locationManager.hasLocationPermission()) {
+                    R.string.loading_gps
+                } else {
+                    R.string.choose_on_map
+                }
+            )
+            binding.tvHomeCoordinates.text = "--"
         }
-        binding.tvHomeCoordinates.text =
-            NativeGeocoder.formatCoordinates(formLocation.latitude, formLocation.longitude)
 
         val note = draftNote
         if (!note.isNullOrBlank()) {
@@ -915,43 +1003,22 @@ class HomeFragment : Fragment() {
         }
 
         renderFormPhotoState()
-        updateTimestampViews(formTimestamp)
-        if (formTimestamp > 0L) {
-            startElapsedTimer()
-        } else {
-            stopElapsedTimer()
-        }
+        val displayTimestamp = if (formTimestamp > 0L) formTimestamp else System.currentTimeMillis()
+        updateTimestampViews(displayTimestamp)
+        startElapsedTimer()
         updateDistanceUI()
-        mapLibreMap?.let {
-            ParkingUiHelper.showCoordinatesOnMap(
-                it,
-                isMapStyleLoaded,
-                formLocation.latitude,
-                formLocation.longitude,
-                animateCamera = focusMap
-            )
-        }
-    }
-
-    private fun renderEmptyPhotos() {
-        val count = pendingPhotos.size
-        binding.tvEmptyPhotoHeader.text = getString(
-            R.string.parking_photos_count_format,
-            count,
-            ParkingPhotoItem.MAX_PHOTOS_PER_RECORD
-        )
-        val canAdd = count < ParkingPhotoItem.MAX_PHOTOS_PER_RECORD && !isPhotoImportInProgress
-        binding.btnEmptyAddPhoto.isEnabled = canAdd
-        binding.btnEmptyAddPhoto.alpha = if (canAdd) 1.0f else 0.5f
-
-        if (pendingPhotos.isEmpty()) {
-            binding.rvEmptyPhotos.visibility = View.GONE
-            binding.btnEmptyClearAll.visibility = View.GONE
-            emptyPhotoAdapter.submitList(emptyList())
+        if (formLocation != null) {
+            mapLibreMap?.let {
+                ParkingUiHelper.showCoordinatesOnMap(
+                    it,
+                    isMapStyleLoaded,
+                    formLocation.latitude,
+                    formLocation.longitude,
+                    animateCamera = focusMap
+                )
+            }
         } else {
-            binding.rvEmptyPhotos.visibility = View.VISIBLE
-            binding.btnEmptyClearAll.visibility = View.VISIBLE
-            emptyPhotoAdapter.submitList(pendingPhotos)
+            ParkingUiHelper.clearMapMarker(mapLibreMap)
         }
     }
 
@@ -1112,8 +1179,14 @@ class HomeFragment : Fragment() {
             } else {
                 pickMultipleMediaLauncher.launch(request)
             }
-        } catch (_: ActivityNotFoundException) {
-            Toast.makeText(requireContext(), R.string.photo_picker_unavailable, Toast.LENGTH_SHORT).show()
+        } catch (_: Exception) {
+            try {
+                fallbackGalleryLauncher.launch(
+                    ParkingUiHelper.buildFallbackGalleryIntent(allowMultiple = remainingSlots > 1)
+                )
+            } catch (_: Exception) {
+                Toast.makeText(requireContext(), R.string.photo_picker_unavailable, Toast.LENGTH_SHORT).show()
+            }
         }
     }
 
@@ -1212,7 +1285,6 @@ class HomeFragment : Fragment() {
             pendingPhotos.add(item)
             hasUnsavedFormChanges = true
             if (formTimestamp <= 0L) formTimestamp = System.currentTimeMillis()
-            renderEmptyPhotos()
             renderSheetState(focusMap = false)
             if (showAddedToast) {
                 val msg = if (pendingPhotos.size >= ParkingPhotoItem.MAX_PHOTOS_PER_RECORD) {
@@ -1278,7 +1350,6 @@ class HomeFragment : Fragment() {
         deleteUnreferencedPhoto(removed.filePath, null)
         hasUnsavedFormChanges = true
         if (formTimestamp <= 0L) formTimestamp = System.currentTimeMillis()
-        renderEmptyPhotos()
         renderSheetState(focusMap = false)
         Toast.makeText(requireContext(), R.string.photo_removed_confirmation, Toast.LENGTH_SHORT).show()
     }
@@ -1326,31 +1397,46 @@ class HomeFragment : Fragment() {
     }
 
     private fun confirmClearHomeForm() {
+        val prevLatLng = draftLatLng
+        val prevAddress = draftAddress
+
         draftPlaceLabel = null
         draftNote = null
         clearPendingPhotos()
         parkingStorage.clearActiveSpot()
         activeRecord = null
-        stopLiveDistanceUpdates()
         formTimestamp = System.currentTimeMillis()
         isFormSavedToSaved = false
-        hasUnsavedFormChanges = true
+        hasUnsavedFormChanges = false
 
-        val current = latestUserLocation
-        if (current != null) {
-            draftLatLng = LatLng(current.latitude, current.longitude)
-            draftAddress = null
+        draftLatLng = null
+        draftAddress = null
+        isAutoDefaultGpsLocation = false
+        populateDefaultGpsOrFetch()
+
+        val resolvedLoc = draftLatLng
+        if (resolvedLoc != null) {
+            val reusedAddress = if (prevLatLng != null && !prevAddress.isNullOrBlank()) {
+                val dist = DistanceCalculator.calculateDistanceMeters(
+                    latestUserLocation,
+                    com.example.devicewatch.model.ParkingSpot(prevLatLng.latitude, prevLatLng.longitude, 0L)
+                )
+                if (dist in 0f..15f) prevAddress else null
+            } else {
+                null
+            }
+            draftAddress = reusedAddress
             renderSheetState(focusMap = true)
-            resolveFormAddressAsync(current.latitude, current.longitude)
+            if (reusedAddress == null) {
+                resolveFormAddressAsync(resolvedLoc.latitude, resolvedLoc.longitude)
+            }
         } else {
-            draftAddress = null
             renderSheetState(focusMap = false)
         }
         if (locationManager.hasLocationPermission()) {
-            fetchGpsLocationIntoForm(showLoading = false)
+            startLiveDistanceUpdates()
         }
         Toast.makeText(requireContext(), R.string.home_cleared, Toast.LENGTH_SHORT).show()
-        (activity as? MainActivity)?.notifyParkingDataChanged()
     }
 
     private fun startLiveDistanceUpdates() {
@@ -1361,9 +1447,7 @@ class HomeFragment : Fragment() {
                 if (!isAdded || _binding == null) return
                 latestUserLocation = location
                 ParkingUiHelper.updateUserLocationPuck(mapLibreMap, location)
-                if (draftLatLng != null || activeRecord != null) {
-                    updateDistanceUI()
-                }
+                applyAutoDefaultLocationIfNeeded(location)
             }
 
             override fun onLocationError(message: String) {
@@ -1386,21 +1470,17 @@ class HomeFragment : Fragment() {
     private fun setSaveLoading(loading: Boolean) {
         isSaveInProgress = loading
         binding.progressHome.visibility = if (loading || isPhotoImportInProgress) View.VISIBLE else View.GONE
-        binding.btnSaveGpsSpot.isEnabled = !loading
         binding.btnHomeSave.isEnabled = !loading
         binding.btnHomeSaveNewSpot.isEnabled = !loading
-        binding.btnSaveGpsSpot.setText(
-            if (loading) R.string.saving_parking_spot else R.string.save_parking_spot
+        binding.btnHomeSaveNewSpot.setText(
+            if (loading) R.string.saving_parking_spot else R.string.save_new_parking_spot
         )
     }
 
     private fun setPhotoSaving(saving: Boolean) {
         isPhotoImportInProgress = saving
         binding.progressHome.visibility = if (saving || isSaveInProgress) View.VISIBLE else View.GONE
-        renderEmptyPhotos()
-        if (draftLatLng != null || activeRecord != null) {
-            renderFormPhotoState()
-        }
+        renderFormPhotoState()
     }
 
     private fun showPermissionDeniedBanner() {
@@ -1521,6 +1601,11 @@ class HomeFragment : Fragment() {
         draftPlaceLabel?.let { outState.putString(KEY_DRAFT_LABEL, it) }
         draftAddress?.let { outState.putString(KEY_DRAFT_ADDRESS, it) }
         draftNote?.let { outState.putString(KEY_DRAFT_NOTE, it) }
+        outState.putLong(KEY_FORM_TIMESTAMP, formTimestamp)
+        outState.putBoolean(KEY_FORM_SAVED, isFormSavedToSaved)
+        outState.putBoolean(KEY_FORM_DIRTY, hasUnsavedFormChanges)
+        outState.putBoolean(KEY_PHOTO_TARGET_PENDING, photoTargetIsPending)
+        photoTargetRecordId?.let { outState.putString(KEY_PHOTO_TARGET_RECORD_ID, it) }
         if (_binding != null) mapView?.onSaveInstanceState(outState)
     }
 

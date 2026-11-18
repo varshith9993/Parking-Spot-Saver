@@ -1,5 +1,6 @@
 package com.example.devicewatch.storage;
 
+import android.content.res.AssetFileDescriptor;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
@@ -106,19 +107,10 @@ public class ParkingPhotoManager {
             File destFile = null;
             try {
                 destFile = createPersistentPhotoFile();
-                try (InputStream in = appContext.getContentResolver().openInputStream(sourceUri);
-                     FileOutputStream out = new FileOutputStream(destFile)) {
-                    if (in == null) {
-                        deleteFileQuietly(destFile);
-                        postError(callback, "Unable to open selected image.");
-                        return;
-                    }
-                    byte[] buffer = new byte[BUFFER_SIZE];
-                    int read;
-                    while ((read = in.read(buffer)) != -1) {
-                        out.write(buffer, 0, read);
-                    }
-                    out.flush();
+                if (!copyUriToFile(sourceUri, destFile)) {
+                    deleteFileQuietly(destFile);
+                    postError(callback, "Unable to open selected image.");
+                    return;
                 }
 
                 if (destFile.length() == 0L) {
@@ -127,10 +119,19 @@ public class ParkingPhotoManager {
                     return;
                 }
 
+                BitmapFactory.Options bounds = new BitmapFactory.Options();
+                bounds.inJustDecodeBounds = true;
+                BitmapFactory.decodeFile(destFile.getAbsolutePath(), bounds);
+                if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
+                    deleteFileQuietly(destFile);
+                    postError(callback, "Selected file is not a supported image.");
+                    return;
+                }
+
                 PhotoMetadata metadata = extractMetadataFromFile(destFile.getAbsolutePath());
                 deletePhotoFileSync(previousPhotoPath);
                 postReady(callback, metadata);
-            } catch (IOException | SecurityException e) {
+            } catch (Exception | OutOfMemoryError e) {
                 if (destFile != null) {
                     deleteFileQuietly(destFile);
                 }
@@ -138,6 +139,37 @@ public class ParkingPhotoManager {
                 postError(callback, msg);
             }
         });
+    }
+
+    private boolean copyUriToFile(@NonNull Uri sourceUri, @NonNull File destFile) throws IOException {
+        try (InputStream in = appContext.getContentResolver().openInputStream(sourceUri);
+             FileOutputStream out = new FileOutputStream(destFile)) {
+            if (in != null) {
+                copyStream(in, out);
+                return true;
+            }
+        } catch (IOException | SecurityException | IllegalArgumentException | IllegalStateException ignored) {
+            // Fall through to AssetFileDescriptor fallback for providers without direct stream support.
+        }
+        try (AssetFileDescriptor afd = appContext.getContentResolver().openAssetFileDescriptor(sourceUri, "r")) {
+            if (afd == null) {
+                return false;
+            }
+            try (InputStream in = afd.createInputStream();
+                 FileOutputStream out = new FileOutputStream(destFile)) {
+                copyStream(in, out);
+                return true;
+            }
+        }
+    }
+
+    private static void copyStream(@NonNull InputStream in, @NonNull FileOutputStream out) throws IOException {
+        byte[] buffer = new byte[BUFFER_SIZE];
+        int read;
+        while ((read = in.read(buffer)) != -1) {
+            out.write(buffer, 0, read);
+        }
+        out.flush();
     }
 
     /**
@@ -226,7 +258,7 @@ public class ParkingPhotoManager {
                 Bitmap bitmap = BitmapFactory.decodeFile(photoPath, decodeOpts);
                 Bitmap oriented = applyExifOrientation(photoPath, bitmap);
                 mainHandler.post(() -> callback.onBitmapLoaded(oriented));
-            } catch (Exception e) {
+            } catch (Exception | OutOfMemoryError e) {
                 mainHandler.post(() -> callback.onBitmapLoaded(null));
             }
         });
@@ -287,8 +319,8 @@ public class ParkingPhotoManager {
                 lat = latLong[0];
                 lng = latLong[1];
             }
-        } catch (IOException ignored) {
-            // File may be a PNG/WebP without EXIF; record import time below without failing.
+        } catch (Exception | OutOfMemoryError ignored) {
+            // File may be a PNG/WebP/HEIC without standard EXIF; record import time below without failing.
         }
 
         long importedAt = capturedAt > 0L ? 0L : System.currentTimeMillis();
@@ -403,7 +435,7 @@ public class ParkingPhotoManager {
                 bitmap.recycle();
             }
             return rotated;
-        } catch (IOException | OutOfMemoryError e) {
+        } catch (Exception | OutOfMemoryError e) {
             return bitmap;
         }
     }
@@ -423,6 +455,10 @@ public class ParkingPhotoManager {
                     && (halfWidth / inSampleSize) >= reqWidth) {
                 inSampleSize *= 2;
             }
+        }
+        int maxDimension = Math.max(reqWidth, reqHeight) * 2;
+        while ((height / inSampleSize) > maxDimension || (width / inSampleSize) > maxDimension) {
+            inSampleSize *= 2;
         }
         return Math.max(1, inSampleSize);
     }

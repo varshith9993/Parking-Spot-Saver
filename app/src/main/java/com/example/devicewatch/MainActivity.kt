@@ -1,13 +1,21 @@
 package com.example.devicewatch
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.fragment.app.Fragment
+import androidx.lifecycle.Lifecycle
 import com.example.devicewatch.databinding.ActivityMainBinding
+import com.example.devicewatch.location.ParkingLocationManager
 import com.example.devicewatch.sensor.ShakeDetector
+import com.example.devicewatch.sensor.ShakeMonitorService
 import com.example.devicewatch.storage.ParkingStorage
 
 class MainActivity : AppCompatActivity() {
@@ -23,9 +31,16 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
     private lateinit var parkingStorage: ParkingStorage
+    private lateinit var locationManager: ParkingLocationManager
     private lateinit var shakeDetector: ShakeDetector
 
     private var selectedTabId: Int = R.id.nav_home
+
+    private val notificationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) {
+        updateShakeConfigFromSettings()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -36,6 +51,7 @@ class MainActivity : AppCompatActivity() {
         applyBottomNavInsets()
 
         parkingStorage = ParkingStorage(this)
+        locationManager = ParkingLocationManager(this)
         shakeDetector = ShakeDetector(this) { onShakeDetected() }
 
         selectedTabId = savedInstanceState?.getInt(KEY_SELECTED_TAB, R.id.nav_home) ?: R.id.nav_home
@@ -126,13 +142,34 @@ class MainActivity : AppCompatActivity() {
         (supportFragmentManager.findFragmentByTag(TAG_HISTORY) as? HistoryFragment)?.refreshData()
     }
 
+    fun requestNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+
     fun updateShakeConfigFromSettings() {
-        if (!shakeDetector.isAccelerometerAvailable()) return
+        if (!shakeDetector.isAccelerometerAvailable()) {
+            ShakeMonitorService.stop(this)
+            return
+        }
+        val enabled = parkingStorage.isShakeToSaveEnabled()
         shakeDetector.setSensitivity(parkingStorage.getShakeSensitivity())
-        if (parkingStorage.isShakeToSaveEnabled()) {
+        if (enabled && ShakeMonitorService.isMainForeground) {
             shakeDetector.start()
         } else {
             shakeDetector.stop()
+        }
+
+        if (enabled && locationManager.hasLocationPermission() &&
+            lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
+        ) {
+            ShakeMonitorService.start(this)
+        } else if (!enabled) {
+            ShakeMonitorService.stop(this)
         }
     }
 
@@ -146,10 +183,13 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        ShakeMonitorService.isMainForeground = true
         updateShakeConfigFromSettings()
+        notifyParkingDataChanged()
     }
 
     override fun onPause() {
+        ShakeMonitorService.isMainForeground = false
         shakeDetector.stop()
         super.onPause()
     }
