@@ -5,7 +5,8 @@ import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
 
 /**
- * Parses QR payloads found in garages, meters, and shared map links into parking form fields.
+ * Parses QR payloads found in garages, meters, and shared map links.
+ * Text/bay details are always placed into `placeLabel` only (never `note`).
  */
 object ParkingQrParser {
 
@@ -23,6 +24,7 @@ object ParkingQrParser {
 
     private val coordPairRegex = Regex("""(-?\d{1,2}(?:\.\d+)?)\s*,\s*(-?\d{1,3}(?:\.\d+)?)""")
     private val atCoordRegex = Regex("""@(-?\d{1,2}(?:\.\d+)?),(-?\d{1,3}(?:\.\d+)?)""")
+    private val placePathRegex = Regex("""/maps/place/([^/@]+)""", RegexOption.IGNORE_CASE)
     private val dmsOrJsonLatRegex = Regex(""""lat(?:itude)?"\s*:\s*(-?\d{1,2}(?:\.\d+)?)""", RegexOption.IGNORE_CASE)
     private val dmsOrJsonLngRegex = Regex(""""(?:lng|lon|longitude)"\s*:\s*(-?\d{1,3}(?:\.\d+)?)""", RegexOption.IGNORE_CASE)
 
@@ -34,16 +36,19 @@ object ParkingQrParser {
         parseUrlPayload(raw)?.let { return it }
         parsePlainCoordinates(raw)?.let { return it }
 
-        // Treat remaining plain text (e.g., "Level B2\nPillar 14") as bay/zone details.
-        val lines = raw.lines().map { it.trim() }.filter { it.isNotEmpty() }
-        val placeLabel = lines.firstOrNull()?.take(80)
-        val note = lines.drop(1).joinToString(" • ").takeIf { it.isNotBlank() }
+        // Combine all lines of plain text into placeLabel only (never note).
+        val mergedLabel = raw.lines()
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .joinToString(" • ")
+            .take(120)
+            .takeIf { it.isNotEmpty() }
         return ParsedQrResult(
             latitude = null,
             longitude = null,
-            placeLabel = placeLabel,
+            placeLabel = mergedLabel,
             address = null,
-            note = note,
+            note = null,
             rawText = raw
         )
     }
@@ -53,16 +58,22 @@ object ParkingQrParser {
         val lat = dmsOrJsonLatRegex.find(raw)?.groupValues?.get(1)?.toDoubleOrNull()
         val lng = dmsOrJsonLngRegex.find(raw)?.groupValues?.get(1)?.toDoubleOrNull()
         val validCoords = isValidLatLng(lat, lng)
-        val label = extractJsonString(raw, "label", "placeLabel", "name", "bay", "spot", "title")
+
+        val labelParts = listOfNotNull(
+            extractJsonString(raw, "label", "placeLabel", "name", "title"),
+            extractJsonString(raw, "floor", "level"),
+            extractJsonString(raw, "bay", "spot", "zone"),
+            extractJsonString(raw, "note", "notes", "details")
+        ).distinct()
+        val mergedLabel = labelParts.joinToString(" • ").take(120).takeIf { it.isNotEmpty() }
         val address = extractJsonString(raw, "address", "location")
-        val note = extractJsonString(raw, "note", "notes", "level", "floor", "zone", "details")
-        if (!validCoords && label == null && address == null && note == null) return null
+        if (!validCoords && mergedLabel == null && address == null) return null
         return ParsedQrResult(
             latitude = if (validCoords) lat else null,
             longitude = if (validCoords) lng else null,
-            placeLabel = label,
+            placeLabel = mergedLabel,
             address = address,
-            note = note,
+            note = null,
             rawText = raw
         )
     }
@@ -105,8 +116,17 @@ object ParkingQrParser {
         } ?: return null
 
         val params = parseQueryParams(uri.rawQuery.orEmpty())
-        val labelParam = params["label"] ?: params["name"] ?: params["spot"] ?: params["bay"]
-        val noteParam = params["note"] ?: params["zone"] ?: params["floor"]
+        val floorZone = params["floor"] ?: params["level"]
+        val bayZone = params["bay"] ?: params["spot"] ?: params["zone"]
+        val placeFromPath = placePathRegex.find(uri.rawPath.orEmpty())?.groupValues?.get(1)
+            ?.let { decode(it).replace('+', ' ').trim().takeIf { name -> name.isNotEmpty() } }
+        val explicitLabel = params["label"] ?: params["name"] ?: params["title"]
+        val extraDetail = params["note"] ?: params["details"]
+        val labelParam = listOfNotNull(explicitLabel, floorZone, bayZone, extraDetail, placeFromPath)
+            .distinct()
+            .joinToString(" • ")
+            .take(120)
+            .takeIf { it.isNotEmpty() }
 
         val paramCoordKeys = listOf("q", "query", "ll", "center", "sll", "destination")
         for (key in paramCoordKeys) {
@@ -117,8 +137,8 @@ object ParkingQrParser {
                     latitude = parsed.first,
                     longitude = parsed.second,
                     placeLabel = labelParam ?: parsed.third,
-                    address = null,
-                    note = noteParam,
+                    address = params["address"],
+                    note = null,
                     rawText = raw
                 )
             }
@@ -132,7 +152,7 @@ object ParkingQrParser {
                 longitude = lngParam,
                 placeLabel = labelParam,
                 address = params["address"],
-                note = noteParam,
+                note = null,
                 rawText = raw
             )
         }
@@ -146,11 +166,22 @@ object ParkingQrParser {
                     latitude = lat,
                     longitude = lng,
                     placeLabel = labelParam,
-                    address = null,
-                    note = noteParam,
+                    address = params["address"],
+                    note = null,
                     rawText = raw
                 )
             }
+        }
+
+        if (labelParam != null || params["address"] != null) {
+            return ParsedQrResult(
+                latitude = null,
+                longitude = null,
+                placeLabel = labelParam,
+                address = params["address"],
+                note = null,
+                rawText = raw
+            )
         }
 
         return null
@@ -193,11 +224,15 @@ object ParkingQrParser {
     }
 
     private fun parseCoordPairAndLabel(text: String): Triple<Double, Double, String?>? {
-        val match = coordPairRegex.find(text.trim()) ?: return null
+        val cleaned = text.trim()
+            .removePrefix("loc:")
+            .removePrefix("LOC:")
+            .trim()
+        val match = coordPairRegex.find(cleaned) ?: return null
         val lat = match.groupValues[1].toDoubleOrNull()
         val lng = match.groupValues[2].toDoubleOrNull()
         if (lat == null || lng == null || !isValidLatLng(lat, lng)) return null
-        val after = text.trim().substring(match.range.last + 1).trim()
+        val after = cleaned.substring(match.range.last + 1).trim()
         val label = if (after.startsWith("(") && after.endsWith(")")) {
             after.substring(1, after.length - 1).trim().takeIf { it.isNotEmpty() }
         } else {

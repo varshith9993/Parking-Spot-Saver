@@ -22,4 +22,10 @@
     <color name="ps_switch_track_off">#E2E7EC</color>
     <color name="ps_switch_thumb_off">#5F6368</color>
     <color name="ps_switch_outline_off">#9AA0A6</color>
+    <color name="ps_widget_bg">#FFFFFF</color>
+    <color name="ps_widget_inner_bg">#F3F8F4</color>
+    <color name="ps_widget_inner_stroke">#DCE7DF</color>
+    <color name="ps_widget_chip_bg">#E4EFE7</color>
+    <color name="ps_widget_tonal_btn">#EAF3EC</color>
+    <color name="ps_widget_tonal_btn_stroke">#CFE2D5</color>
 </resources>

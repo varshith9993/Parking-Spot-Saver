@@ -279,21 +279,56 @@
     <string name="cooldown_5_min">5 min</string>
 
     <!-- QR Scanner -->
+    <string name="settings_group_qr">QR Scanner</string>
+    <string name="qr_auto_flash_title">Turn on flash for QR scan</string>
+    <string name="qr_auto_flash_desc">Automatically switch on flashlight when opening QR scanner (on by default).</string>
     <string name="scan_parking_qr">Scan Parking QR</string>
     <string name="scan_parking_qr_desc">Scan a parking bay or map QR code to fill Home form</string>
     <string name="qr_scanner_title">Scan Parking QR</string>
     <string name="qr_scanner_hint">Align a parking spot, bay, or map QR code inside the frame</string>
+    <string name="qr_camera_unavailable_gallery_hint">Camera off — choose a QR image from Gallery below</string>
+    <string name="qr_scan_from_gallery">Scan from Gallery</string>
+    <string name="qr_gallery_no_code">No QR code found in that image.</string>
+    <string name="qr_gallery_read_error">Could not open that image.</string>
     <string name="qr_torch_toggle">Toggle flashlight</string>
     <string name="qr_camera_permission_denied">Camera permission is needed to scan parking QR codes.</string>
-    <string name="qr_scan_filled_coords">QR location filled — review and tap Save New Spot</string>
-    <string name="qr_scan_filled_label">QR spot details filled into label/note</string>
+    <string name="qr_camera_permission_denied_gallery_ok">Camera denied — you can pick a QR image from Gallery instead.</string>
+    <string name="qr_scan_filled_coords">QR location updated — review and tap Save New Spot</string>
+    <string name="qr_scan_filled_coords_and_label">QR location &amp; label filled — review and tap Save New Spot</string>
+    <string name="qr_scan_filled_label">QR text filled into Place Label</string>
     <string name="qr_scan_empty_or_invalid">Could not read parking details from that QR code.</string>
 
     <!-- Home Screen Widget -->
     <string name="widget_name">Parking Spot</string>
-    <string name="widget_description">View your saved parking spot and save or navigate in one tap.</string>
+    <string name="widget_description">Save GPS in one tap right from your home screen, toggle bookmark, scan QR, navigate, or share.</string>
+    <string name="widget_status_ready">READY TO PARK</string>
+    <string name="widget_status_active">PARKED SPOT</string>
+    <string name="widget_status_saving">SAVING SPOT…</string>
+    <string name="widget_saving_title">Getting GPS location…</string>
+    <string name="widget_saving_subtitle">Saving your spot right on the home screen…</string>
     <string name="widget_no_spot_title">No active parking spot</string>
-    <string name="widget_no_spot_subtitle">Tap Save Spot when parked to record your location.</string>
+    <string name="widget_no_spot_subtitle">Tap Save Spot to record GPS in-place or Scan QR.</string>
+    <string name="widget_header_idle_sub">Tap Save GPS anytime</string>
     <string name="widget_save_spot">Save Spot</string>
+    <string name="widget_new_spot">Save New</string>
+    <string name="widget_scan_qr">Scan QR</string>
     <string name="widget_navigate">Navigate</string>
+    <string name="widget_bookmark_desc">Bookmark spot</string>
+    <string name="widget_clear_desc">Clear active spot</string>
+    <string name="widget_minimap_desc">Saved parking location mini-map</string>
+    <string name="widget_map_close_desc">Close expanded map</string>
+    <string name="widget_map_zoom_in_desc">Zoom in map</string>
+    <string name="widget_map_zoom_out_desc">Zoom out map</string>
+    <string name="widget_map_my_location_desc">Center on current location</string>
+    <string name="widget_map_status_spot">Pinned spot · Zoom %.0f</string>
+    <string name="widget_map_status_user">Current GPS · Zoom %.0f</string>
+    <string name="widget_map_updating">Updating map…</string>
+    <string name="widget_show_distance">Show Distance</string>
+    <string name="widget_distance_check_hint">Check</string>
+    <string name="widget_getting_distance">Getting distance…</string>
+    <string name="widget_distance_away_format">%1$s away</string>
+    <string name="widget_saved_toast">Parking spot saved</string>
+    <string name="widget_cleared_toast">Active spot cleared from widget</string>
+    <string name="widget_location_permission_needed">Allow Location permission once so the widget can save GPS.</string>
+    <string name="widget_gps_failed_toast">GPS unavailable right now — turn on Location and retry.</string>
 </resources>

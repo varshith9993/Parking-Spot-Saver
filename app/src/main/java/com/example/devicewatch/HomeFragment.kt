@@ -168,13 +168,15 @@ class HomeFragment : Fragment() {
                 PendingCameraAction.PHOTO -> openCameraCaptureActivity()
                 PendingCameraAction.QR -> openQrScannerActivity()
             }
+        } else if (action == PendingCameraAction.QR) {
+            Toast.makeText(
+                requireContext(),
+                R.string.qr_camera_permission_denied_gallery_ok,
+                Toast.LENGTH_LONG
+            ).show()
+            openQrScannerActivity()
         } else {
-            val msgRes = if (action == PendingCameraAction.QR) {
-                R.string.qr_camera_permission_denied
-            } else {
-                R.string.camera_permission_denied
-            }
-            Toast.makeText(requireContext(), msgRes, Toast.LENGTH_LONG).show()
+            Toast.makeText(requireContext(), R.string.camera_permission_denied, Toast.LENGTH_LONG).show()
         }
     }
 
@@ -528,6 +530,11 @@ class HomeFragment : Fragment() {
         pendingShakeConfirmation = false
         pendingSaveToSavedList = false
         startGpsSaveFlow()
+    }
+
+    fun triggerQrScanFromExternal() {
+        if (!isAdded || _binding == null) return
+        launchQrScannerFlow()
     }
 
     fun refreshFromStorage(focusMap: Boolean) {
@@ -1204,7 +1211,11 @@ class HomeFragment : Fragment() {
     ) {
         val pm = requireContext().packageManager
         if (!pm.hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY)) {
-            Toast.makeText(requireContext(), R.string.camera_unavailable, Toast.LENGTH_SHORT).show()
+            if (action == PendingCameraAction.QR) {
+                openQrScannerActivity()
+            } else {
+                Toast.makeText(requireContext(), R.string.camera_unavailable, Toast.LENGTH_SHORT).show()
+            }
             return
         }
         val granted = ContextCompat.checkSelfPermission(
@@ -1245,26 +1256,24 @@ class HomeFragment : Fragment() {
         ) {
             draftLatLng = LatLng(lat, lng)
             draftAddress = parsed.address
-            if (!parsed.placeLabel.isNullOrBlank()) {
-                draftPlaceLabel = parsed.placeLabel
-            }
-            if (!parsed.note.isNullOrBlank()) {
-                draftNote = parsed.note
-            }
+            draftPlaceLabel = parsed.placeLabel
             isAutoDefaultGpsLocation = false
             formTimestamp = System.currentTimeMillis()
             hasUnsavedFormChanges = true
             renderSheetState(focusMap = true)
+            bottomSheetBehavior.state = BottomSheetBehavior.STATE_EXPANDED
             if (draftAddress.isNullOrBlank()) {
                 resolveFormAddressAsync(lat, lng)
             }
-            Toast.makeText(requireContext(), R.string.qr_scan_filled_coords, Toast.LENGTH_LONG).show()
+            val msgRes = if (!parsed.placeLabel.isNullOrBlank()) {
+                R.string.qr_scan_filled_coords_and_label
+            } else {
+                R.string.qr_scan_filled_coords
+            }
+            Toast.makeText(requireContext(), msgRes, Toast.LENGTH_LONG).show()
         } else {
             if (!parsed.placeLabel.isNullOrBlank()) {
                 draftPlaceLabel = parsed.placeLabel
-            }
-            if (!parsed.note.isNullOrBlank()) {
-                draftNote = parsed.note
             }
             if (!parsed.address.isNullOrBlank()) {
                 draftAddress = parsed.address
@@ -1275,6 +1284,7 @@ class HomeFragment : Fragment() {
             }
             hasUnsavedFormChanges = true
             renderSheetState(focusMap = false)
+            bottomSheetBehavior.state = BottomSheetBehavior.STATE_EXPANDED
             Toast.makeText(requireContext(), R.string.qr_scan_filled_label, Toast.LENGTH_LONG).show()
         }
     }

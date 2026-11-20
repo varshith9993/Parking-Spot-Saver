@@ -11,65 +11,90 @@ import org.junit.Test
 class ParkingQrParserTest {
 
     @Test
-    fun parsesGeoUriWithLabel() {
+    fun parsesGeoUriWithLabelIntoLabelOnly() {
         val result = ParkingQrParser.parse("geo:0,0?q=37.421998,-122.084(Garage%20B2)")
         assertNotNull(result)
         assertTrue(result!!.hasCoordinates)
         assertEquals(37.421998, result.latitude!!, 0.0001)
         assertEquals(-122.084, result.longitude!!, 0.0001)
         assertEquals("Garage B2", result.placeLabel)
+        assertNull(result.note)
     }
 
     @Test
-    fun parsesGoogleMapsQueryUrl() {
-        val result = ParkingQrParser.parse("https://maps.google.com/?q=17.3850,78.4867&label=Pillar%20A4")
+    fun parsesLocationOnlyGoogleMapsUrlWithNullLabel() {
+        val result = ParkingQrParser.parse("https://maps.google.com/?q=17.3850,78.4867")
         assertNotNull(result)
         assertTrue(result!!.hasCoordinates)
         assertEquals(17.3850, result.latitude!!, 0.0001)
         assertEquals(78.4867, result.longitude!!, 0.0001)
-        assertEquals("Pillar A4", result.placeLabel)
+        assertNull(result.placeLabel)
+        assertNull(result.note)
     }
 
     @Test
-    fun parsesGoogleMapsAtPathUrl() {
-        val result = ParkingQrParser.parse("https://www.google.com/maps/@12.9716,77.5946,18z")
-        assertNotNull(result)
-        assertTrue(result!!.hasCoordinates)
-        assertEquals(12.9716, result.latitude!!, 0.0001)
-        assertEquals(77.5946, result.longitude!!, 0.0001)
+    fun parsesGoogleMapsPlacePathAndLocPrefix() {
+        val placeResult = ParkingQrParser.parse(
+            "https://www.google.com/maps/place/Central+Mall+Basement+P2/@17.3850,78.4867,18z"
+        )
+        assertNotNull(placeResult)
+        assertTrue(placeResult!!.hasCoordinates)
+        assertEquals(17.3850, placeResult.latitude!!, 0.0001)
+        assertEquals(78.4867, placeResult.longitude!!, 0.0001)
+        assertEquals("Central Mall Basement P2", placeResult.placeLabel)
+        assertNull(placeResult.note)
+
+        val locResult = ParkingQrParser.parse("https://maps.google.com/?q=loc:37.4220,-122.0841")
+        assertNotNull(locResult)
+        assertTrue(locResult!!.hasCoordinates)
+        assertEquals(37.4220, locResult.latitude!!, 0.0001)
+        assertEquals(-122.0841, locResult.longitude!!, 0.0001)
+        assertNull(locResult.placeLabel)
+        assertNull(locResult.note)
     }
 
     @Test
-    fun parsesJsonPayload() {
-        val result = ParkingQrParser.parse(
+    fun parsesJsonPayloadAndMergesAllDetailsIntoLabelOnly() {
+        val explicitResult = ParkingQrParser.parse(
             """{"lat":40.7128,"lng":-74.006,"label":"Lot C","note":"Level 2 Bay 18"}"""
         )
-        assertNotNull(result)
-        assertTrue(result!!.hasCoordinates)
-        assertEquals(40.7128, result.latitude!!, 0.0001)
-        assertEquals(-74.006, result.longitude!!, 0.0001)
-        assertEquals("Lot C", result.placeLabel)
-        assertEquals("Level 2 Bay 18", result.note)
+        assertNotNull(explicitResult)
+        assertTrue(explicitResult!!.hasCoordinates)
+        assertEquals(40.7128, explicitResult.latitude!!, 0.0001)
+        assertEquals(-74.006, explicitResult.longitude!!, 0.0001)
+        assertEquals("Lot C • Level 2 Bay 18", explicitResult.placeLabel)
+        assertNull(explicitResult.note)
+
+        val garageResult = ParkingQrParser.parse("""{"floor":"B2","bay":"P14"}""")
+        assertNotNull(garageResult)
+        assertFalse(garageResult!!.hasCoordinates)
+        assertEquals("B2 • P14", garageResult.placeLabel)
+        assertNull(garageResult.note)
     }
 
     @Test
-    fun parsesPlainCoordinatesAndSuffixLabel() {
-        val result = ParkingQrParser.parse("51.5074, -0.1278 - West Zone")
-        assertNotNull(result)
-        assertTrue(result!!.hasCoordinates)
-        assertEquals(51.5074, result.latitude!!, 0.0001)
-        assertEquals(-0.1278, result.longitude!!, 0.0001)
-        assertEquals("West Zone", result.placeLabel)
+    fun parsesPlainCoordinatesOnlyOrWithSuffixLabel() {
+        val locOnly = ParkingQrParser.parse("51.5074, -0.1278")
+        assertNotNull(locOnly)
+        assertTrue(locOnly!!.hasCoordinates)
+        assertNull(locOnly.placeLabel)
+        assertNull(locOnly.note)
+
+        val withLabel = ParkingQrParser.parse("51.5074, -0.1278 - West Zone")
+        assertNotNull(withLabel)
+        assertTrue(withLabel!!.hasCoordinates)
+        assertEquals("West Zone", withLabel.placeLabel)
+        assertNull(withLabel.note)
     }
 
     @Test
-    fun parsesPlainTextBayAsLabelAndNoteWithoutCoordinates() {
+    fun parsesMultiLinePlainTextAllIntoLabelAndNeverIntoNote() {
         val result = ParkingQrParser.parse("Level B2 - Pillar 14\nNear East Elevator")
         assertNotNull(result)
         assertFalse(result!!.hasCoordinates)
         assertNull(result.latitude)
-        assertEquals("Level B2 - Pillar 14", result.placeLabel)
-        assertEquals("Near East Elevator", result.note)
+        assertEquals("Level B2 - Pillar 14 • Near East Elevator", result.placeLabel)
+        assertNull(result.note)
     }
 
     @Test
@@ -79,5 +104,6 @@ class ParkingQrParserTest {
         assertFalse(result!!.hasCoordinates)
         assertNull(result.latitude)
         assertEquals("95.0, 200.0", result.placeLabel)
+        assertNull(result.note)
     }
 }

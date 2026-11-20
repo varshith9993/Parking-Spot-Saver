@@ -52,6 +52,13 @@ public class ParkingStorage {
     private static final String KEY_PHOTO_LONGITUDE = "photo_longitude";
     private static final String KEY_PHOTOS_JSON = "photos_json";
     private static final String KEY_IS_SAVED = "is_saved";
+    private static final String KEY_WIDGET_DIST_RECORD_ID = "widget_dist_record_id";
+    private static final String KEY_WIDGET_DIST_TEXT = "widget_dist_text";
+    private static final String KEY_WIDGET_MAP_EXPANDED = "widget_map_expanded";
+    private static final String KEY_WIDGET_MAP_ZOOM = "widget_map_zoom";
+    private static final String KEY_WIDGET_MAP_USER_LAT = "widget_map_user_lat";
+    private static final String KEY_WIDGET_MAP_USER_LNG = "widget_map_user_lng";
+    private static final String KEY_WIDGET_MAP_CENTER_USER = "widget_map_center_user";
 
     private static final String KEY_LEGACY_HISTORY_JSON = "history_json";
     private static final String KEY_MIGRATION_V2_DONE = "sqlite_migration_v2_done";
@@ -61,6 +68,7 @@ public class ParkingStorage {
     private static final String KEY_SHAKE_SENSITIVITY = "shake_to_save_sensitivity";
     private static final String KEY_SHAKE_COOLDOWN_MS = "shake_to_save_cooldown_ms";
     private static final String KEY_LAST_SHAKE_TRIGGER_MS = "shake_last_trigger_ms";
+    private static final String KEY_QR_AUTO_FLASH = "qr_auto_flash_enabled";
     private static final String KEY_THEME_MODE = "appearance_theme_mode";
     private static final String KEY_NAV_TRAVEL_MODE = "nav_travel_mode";
 
@@ -195,7 +203,106 @@ public class ParkingStorage {
                 .putLong(KEY_PHOTO_LONGITUDE, Double.doubleToRawLongBits(record.getPhotoLongitude()))
                 .putString(KEY_PHOTOS_JSON, ParkingPhotoItem.toJsonString(photos))
                 .putBoolean(KEY_IS_SAVED, record.isSaved())
+                .remove(KEY_WIDGET_DIST_RECORD_ID)
+                .remove(KEY_WIDGET_DIST_TEXT)
+                .remove(KEY_WIDGET_MAP_EXPANDED)
+                .remove(KEY_WIDGET_MAP_CENTER_USER)
+                .remove(KEY_WIDGET_MAP_USER_LAT)
+                .remove(KEY_WIDGET_MAP_USER_LNG)
                 .apply();
+    }
+
+    public boolean isWidgetMapExpanded() {
+        return prefs.getBoolean(KEY_WIDGET_MAP_EXPANDED, false);
+    }
+
+    public void setWidgetMapExpanded(boolean expanded) {
+        prefs.edit().putBoolean(KEY_WIDGET_MAP_EXPANDED, expanded).apply();
+        ParkingSpotWidgetProvider.updateAllWidgets(appContext);
+    }
+
+    public void setWidgetMapExpandedQuiet(boolean expanded) {
+        prefs.edit().putBoolean(KEY_WIDGET_MAP_EXPANDED, expanded).apply();
+    }
+
+    public double getWidgetMapZoom() {
+        float zoom = prefs.getFloat(KEY_WIDGET_MAP_ZOOM, 16.0f);
+        return Math.max(11.0, Math.min(19.0, (double) zoom));
+    }
+
+    public void setWidgetMapZoom(double zoom) {
+        double clamped = Math.max(11.0, Math.min(19.0, zoom));
+        prefs.edit().putFloat(KEY_WIDGET_MAP_ZOOM, (float) clamped).apply();
+        ParkingSpotWidgetProvider.updateAllWidgets(appContext);
+    }
+
+    public void setWidgetMapZoomQuiet(double zoom) {
+        double clamped = Math.max(11.0, Math.min(19.0, zoom));
+        prefs.edit().putFloat(KEY_WIDGET_MAP_ZOOM, (float) clamped).apply();
+    }
+
+    public boolean isWidgetMapCenteredOnUser() {
+        return prefs.getBoolean(KEY_WIDGET_MAP_CENTER_USER, false);
+    }
+
+    public double getWidgetMapUserLat() {
+        return prefs.contains(KEY_WIDGET_MAP_USER_LAT)
+                ? Double.longBitsToDouble(prefs.getLong(KEY_WIDGET_MAP_USER_LAT, 0L))
+                : Double.NaN;
+    }
+
+    public double getWidgetMapUserLng() {
+        return prefs.contains(KEY_WIDGET_MAP_USER_LNG)
+                ? Double.longBitsToDouble(prefs.getLong(KEY_WIDGET_MAP_USER_LNG, 0L))
+                : Double.NaN;
+    }
+
+    public void setWidgetMapUserLocation(double lat, double lng, boolean centerOnUser) {
+        prefs.edit()
+                .putLong(KEY_WIDGET_MAP_USER_LAT, Double.doubleToRawLongBits(lat))
+                .putLong(KEY_WIDGET_MAP_USER_LNG, Double.doubleToRawLongBits(lng))
+                .putBoolean(KEY_WIDGET_MAP_CENTER_USER, centerOnUser)
+                .apply();
+        ParkingSpotWidgetProvider.updateAllWidgets(appContext);
+    }
+
+    public void saveWidgetDistanceAndUserLocationQuiet(
+            @NonNull String recordId,
+            @Nullable String distanceText,
+            double lat,
+            double lng,
+            boolean centerOnUser
+    ) {
+        SharedPreferences.Editor editor = prefs.edit()
+                .putLong(KEY_WIDGET_MAP_USER_LAT, Double.doubleToRawLongBits(lat))
+                .putLong(KEY_WIDGET_MAP_USER_LNG, Double.doubleToRawLongBits(lng))
+                .putBoolean(KEY_WIDGET_MAP_CENTER_USER, centerOnUser);
+        if (distanceText != null) {
+            editor.putString(KEY_WIDGET_DIST_RECORD_ID, recordId)
+                    .putString(KEY_WIDGET_DIST_TEXT, distanceText);
+        }
+        editor.apply();
+    }
+
+    public void resetWidgetMapCenterToSpot() {
+        prefs.edit().putBoolean(KEY_WIDGET_MAP_CENTER_USER, false).apply();
+    }
+
+    @Nullable
+    public String getWidgetDistanceText(@NonNull String recordId) {
+        String storedId = prefs.getString(KEY_WIDGET_DIST_RECORD_ID, null);
+        if (!recordId.equals(storedId)) {
+            return null;
+        }
+        return prefs.getString(KEY_WIDGET_DIST_TEXT, null);
+    }
+
+    public void setWidgetDistanceText(@NonNull String recordId, @Nullable String distanceText) {
+        prefs.edit()
+                .putString(KEY_WIDGET_DIST_RECORD_ID, recordId)
+                .putString(KEY_WIDGET_DIST_TEXT, distanceText)
+                .apply();
+        ParkingSpotWidgetProvider.updateAllWidgets(appContext);
     }
 
     @Nullable
@@ -272,10 +379,14 @@ public class ParkingStorage {
 
     public void setRecordSaved(@NonNull String recordId, boolean isSaved) {
         ParkingRecord active = getActiveRecord();
-        if (active != null && active.getId().equals(recordId)) {
+        boolean isActive = active != null && active.getId().equals(recordId);
+        if (isActive) {
             prefs.edit().putBoolean(KEY_IS_SAVED, isSaved).apply();
         }
         db.setSaved(recordId, isSaved);
+        if (isActive) {
+            ParkingSpotWidgetProvider.updateAllWidgets(appContext);
+        }
     }
 
     public void updateRecordPlaceLabel(@NonNull String recordId, @Nullable String placeLabel) {
@@ -343,7 +454,8 @@ public class ParkingStorage {
                 : photos;
 
         ParkingRecord active = getActiveRecord();
-        if (active != null && active.getId().equals(recordId)) {
+        boolean isActive = active != null && active.getId().equals(recordId);
+        if (isActive) {
             SharedPreferences.Editor editor = prefs.edit()
                     .putString(KEY_PHOTOS_JSON, ParkingPhotoItem.toJsonString(capped));
             if (capped.isEmpty()) {
@@ -363,6 +475,9 @@ public class ParkingStorage {
             editor.apply();
         }
         db.updatePhotos(recordId, capped);
+        if (isActive) {
+            ParkingSpotWidgetProvider.updateAllWidgets(appContext);
+        }
     }
 
     public boolean addPhotoToRecord(@NonNull String recordId, @NonNull ParkingPhotoItem item) {
@@ -618,6 +733,14 @@ public class ParkingStorage {
         synchronized (SHAKE_COOLDOWN_LOCK) {
             settingsPrefs.edit().putLong(KEY_LAST_SHAKE_TRIGGER_MS, Math.max(0L, timestampMs)).apply();
         }
+    }
+
+    public boolean isQrAutoFlashEnabled() {
+        return settingsPrefs.getBoolean(KEY_QR_AUTO_FLASH, true);
+    }
+
+    public void setQrAutoFlashEnabled(boolean enabled) {
+        settingsPrefs.edit().putBoolean(KEY_QR_AUTO_FLASH, enabled).apply();
     }
 
     public int getShakeSensitivity() {

@@ -5,99 +5,590 @@
     android:layout_height="match_parent"
     android:background="@drawable/bg_widget_card"
     android:orientation="vertical"
-    android:padding="14dp">
+    android:padding="12dp">
 
+    <!-- Top Header: Pin emblem + status/time stack + Bookmark / Clear / QR tools -->
     <LinearLayout
+        android:id="@+id/widgetHeaderRow"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:gravity="center_vertical"
         android:orientation="horizontal">
 
-        <ImageView
-            android:layout_width="18dp"
-            android:layout_height="18dp"
-            android:contentDescription="@string/app_name"
-            android:src="@drawable/ic_pin_drop"
-            android:tint="@color/ps_primary" />
+        <FrameLayout
+            android:id="@+id/badgePinIdle"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:background="@drawable/bg_widget_badge_circle">
 
-        <TextView
+            <ImageView
+                android:id="@+id/ivWidgetPinIdle"
+                android:layout_width="17dp"
+                android:layout_height="17dp"
+                android:layout_gravity="center"
+                android:contentDescription="@string/app_name"
+                android:src="@drawable/ic_pin_drop"
+                android:tint="@color/ps_primary" />
+        </FrameLayout>
+
+        <FrameLayout
+            android:id="@+id/badgePinActive"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:background="@drawable/bg_widget_badge_circle_active"
+            android:visibility="gone">
+
+            <ImageView
+                android:id="@+id/ivWidgetPinActive"
+                android:layout_width="17dp"
+                android:layout_height="17dp"
+                android:layout_gravity="center"
+                android:contentDescription="@string/app_name"
+                android:src="@drawable/ic_pin_drop"
+                android:tint="@color/ps_on_primary" />
+        </FrameLayout>
+
+        <LinearLayout
+            android:id="@+id/widgetStatusStack"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:layout_marginStart="6dp"
+            android:layout_marginEnd="6dp"
+            android:layout_marginStart="9dp"
             android:layout_weight="1"
-            android:ellipsize="end"
-            android:maxLines="1"
-            android:text="@string/app_name"
-            android:textColor="@color/ps_primary"
-            android:textSize="12sp"
-            android:textStyle="bold" />
+            android:orientation="vertical">
 
-        <TextView
-            android:id="@+id/tvWidgetTime"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:maxLines="1"
-            android:textColor="@color/ps_text_secondary"
-            android:textSize="11sp"
-            android:visibility="gone" />
+            <TextView
+                android:id="@+id/tvWidgetStatus"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:letterSpacing="0.07"
+                android:maxLines="1"
+                android:text="@string/widget_status_ready"
+                android:textColor="@color/ps_primary"
+                android:textSize="10sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/tvWidgetHeaderSub"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:text="@string/widget_header_idle_sub"
+                android:textColor="@color/ps_text_secondary"
+                android:textSize="11sp" />
+        </LinearLayout>
+
+        <FrameLayout
+            android:id="@+id/btnWidgetBookmark"
+            android:layout_width="30dp"
+            android:layout_height="30dp"
+            android:layout_marginEnd="5dp"
+            android:background="@drawable/bg_widget_chip_neutral"
+            android:contentDescription="@string/widget_bookmark_desc"
+            android:visibility="gone">
+
+            <ImageView
+                android:id="@+id/ivWidgetBookmark"
+                android:layout_width="16dp"
+                android:layout_height="16dp"
+                android:layout_gravity="center"
+                android:contentDescription="@string/widget_bookmark_desc"
+                android:src="@drawable/ic_bookmark_outline"
+                android:tint="@color/ps_primary" />
+        </FrameLayout>
+
+        <FrameLayout
+            android:id="@+id/btnWidgetClear"
+            android:layout_width="30dp"
+            android:layout_height="30dp"
+            android:layout_marginEnd="5dp"
+            android:background="@drawable/bg_widget_chip_neutral"
+            android:contentDescription="@string/widget_clear_desc"
+            android:visibility="gone">
+
+            <ImageView
+                android:id="@+id/ivWidgetClear"
+                android:layout_width="15dp"
+                android:layout_height="15dp"
+                android:layout_gravity="center"
+                android:contentDescription="@string/widget_clear_desc"
+                android:src="@drawable/ic_close"
+                android:tint="@color/ps_text_secondary" />
+        </FrameLayout>
+
+        <FrameLayout
+            android:id="@+id/btnWidgetQr"
+            android:layout_width="30dp"
+            android:layout_height="30dp"
+            android:background="@drawable/bg_widget_button_tonal"
+            android:contentDescription="@string/scan_parking_qr">
+
+            <ImageView
+                android:id="@+id/ivWidgetQr"
+                android:layout_width="16dp"
+                android:layout_height="16dp"
+                android:layout_gravity="center"
+                android:contentDescription="@string/scan_parking_qr"
+                android:src="@drawable/ic_qr_code"
+                android:tint="@color/ps_primary" />
+        </FrameLayout>
     </LinearLayout>
 
-    <TextView
-        android:id="@+id/tvWidgetTitle"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="6dp"
-        android:ellipsize="end"
-        android:maxLines="1"
-        android:text="@string/widget_no_spot_title"
-        android:textColor="@color/ps_text_primary"
-        android:textSize="15sp"
-        android:textStyle="bold" />
-
-    <TextView
-        android:id="@+id/tvWidgetSubtitle"
+    <!-- Flexible Middle Area: toggles between Spot Details+MiniMap card and Full Expanded Widget Map -->
+    <FrameLayout
+        android:id="@+id/widgetMiddleContainer"
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_marginTop="2dp"
-        android:layout_weight="1"
-        android:ellipsize="end"
-        android:maxLines="2"
-        android:text="@string/widget_no_spot_subtitle"
-        android:textColor="@color/ps_text_secondary"
-        android:textSize="12sp" />
+        android:layout_marginTop="8dp"
+        android:layout_weight="1">
 
+        <!-- Normal Mode: Spot Details + Mini-Map Thumbnail + Full-Width Show Distance Bar -->
+        <LinearLayout
+            android:id="@+id/widgetNormalMiddle"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:orientation="vertical">
+
+            <LinearLayout
+                android:id="@+id/widgetSpotCard"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_widget_inner_card"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingBottom="8dp"
+                android:paddingEnd="10dp"
+                android:paddingStart="12dp"
+                android:paddingTop="8dp">
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:gravity="center_vertical"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:id="@+id/tvWidgetTitle"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:ellipsize="end"
+                        android:maxLines="1"
+                        android:text="@string/widget_no_spot_title"
+                        android:textColor="@color/ps_text_primary"
+                        android:textSize="15sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/tvWidgetSubtitle"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:ellipsize="end"
+                        android:maxLines="2"
+                        android:text="@string/widget_no_spot_subtitle"
+                        android:textColor="@color/ps_text_secondary"
+                        android:textSize="12sp" />
+
+                    <LinearLayout
+                        android:id="@+id/layoutWidgetMetaRow"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal"
+                        android:visibility="gone">
+
+                        <TextView
+                            android:id="@+id/tvWidgetCoordsChip"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:background="@drawable/bg_widget_chip_neutral"
+                            android:maxLines="1"
+                            android:paddingBottom="2dp"
+                            android:paddingEnd="7dp"
+                            android:paddingStart="7dp"
+                            android:paddingTop="2dp"
+                            android:textColor="@color/ps_text_secondary"
+                            android:textSize="10sp"
+                            android:textStyle="bold" />
+
+                        <LinearLayout
+                            android:id="@+id/layoutWidgetPhotoBadge"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="5dp"
+                            android:background="@drawable/bg_widget_time_chip"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal"
+                            android:paddingBottom="2dp"
+                            android:paddingEnd="6dp"
+                            android:paddingStart="6dp"
+                            android:paddingTop="2dp"
+                            android:visibility="gone">
+
+                            <ImageView
+                                android:id="@+id/ivWidgetPhotoIcon"
+                                android:layout_width="10dp"
+                                android:layout_height="10dp"
+                                android:contentDescription="@string/parking_photo_label"
+                                android:src="@drawable/ic_camera_action"
+                                android:tint="@color/ps_on_primary_container" />
+
+                            <TextView
+                                android:id="@+id/tvWidgetPhotoCount"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginStart="3dp"
+                                android:maxLines="1"
+                                android:textColor="@color/ps_on_primary_container"
+                                android:textSize="10sp"
+                                android:textStyle="bold" />
+                        </LinearLayout>
+                    </LinearLayout>
+                </LinearLayout>
+
+                <!-- Small rounded MapLibre mini-map on the right (tap opens full middle map) -->
+                <FrameLayout
+                    android:id="@+id/layoutWidgetMapFrame"
+                    android:layout_width="82dp"
+                    android:layout_height="82dp"
+                    android:layout_marginStart="10dp"
+                    android:visibility="gone">
+
+                    <ImageView
+                        android:id="@+id/ivWidgetMiniMap"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:contentDescription="@string/widget_minimap_desc"
+                        android:scaleType="centerCrop" />
+                </FrameLayout>
+            </LinearLayout>
+
+            <!-- High-contrast full-width Show Distance bar -->
+            <LinearLayout
+                android:id="@+id/btnWidgetDistance"
+                android:layout_width="match_parent"
+                android:layout_height="34dp"
+                android:layout_marginTop="6dp"
+                android:background="@drawable/bg_widget_button_tonal"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingEnd="8dp"
+                android:paddingStart="10dp"
+                android:visibility="gone">
+
+                <ImageView
+                    android:id="@+id/ivWidgetDistanceIcon"
+                    android:layout_width="15dp"
+                    android:layout_height="15dp"
+                    android:contentDescription="@string/widget_show_distance"
+                    android:src="@drawable/ic_my_location"
+                    android:tint="@color/ps_primary" />
+
+                <TextView
+                    android:id="@+id/tvWidgetDistance"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginEnd="6dp"
+                    android:layout_marginStart="8dp"
+                    android:layout_weight="1"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:text="@string/widget_show_distance"
+                    android:textColor="@color/ps_primary"
+                    android:textSize="12.5sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/tvWidgetDistanceActionHint"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/bg_widget_chip_light"
+                    android:maxLines="1"
+                    android:paddingBottom="2dp"
+                    android:paddingEnd="8dp"
+                    android:paddingStart="8dp"
+                    android:paddingTop="2dp"
+                    android:text="@string/widget_distance_check_hint"
+                    android:textColor="@color/ps_text_secondary"
+                    android:textSize="10.5sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- Expanded Map Mode: Fills entire middle container with interactive x, +, -, o controls -->
+        <FrameLayout
+            android:id="@+id/widgetExpandedMapContainer"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="gone">
+
+            <ImageView
+                android:id="@+id/ivWidgetExpandedMap"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:contentDescription="@string/widget_minimap_desc"
+                android:scaleType="centerCrop" />
+
+            <!-- Top-left 'x' close button -->
+            <FrameLayout
+                android:id="@+id/btnWidgetMapClose"
+                android:layout_width="30dp"
+                android:layout_height="30dp"
+                android:layout_gravity="top|start"
+                android:layout_margin="8dp"
+                android:background="@drawable/bg_widget_map_ctrl_light"
+                android:contentDescription="@string/widget_map_close_desc">
+
+                <ImageView
+                    android:id="@+id/ivWidgetMapCloseIcon"
+                    android:layout_width="16dp"
+                    android:layout_height="16dp"
+                    android:layout_gravity="center"
+                    android:contentDescription="@string/widget_map_close_desc"
+                    android:src="@drawable/ic_close"
+                    android:tint="#1F1F1F" />
+            </FrameLayout>
+
+            <!-- Bottom-left live map status chip -->
+            <TextView
+                android:id="@+id/tvWidgetMapStatus"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="bottom|start"
+                android:layout_margin="8dp"
+                android:background="@drawable/bg_widget_chip_light"
+                android:maxLines="1"
+                android:paddingBottom="4dp"
+                android:paddingEnd="9dp"
+                android:paddingStart="9dp"
+                android:paddingTop="4dp"
+                android:textColor="#1F1F1F"
+                android:textSize="10.5sp"
+                android:textStyle="bold" />
+
+            <!-- Right-side '+', '-', 'o' (Current Location) floating circular controls -->
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center_vertical|end"
+                android:layout_margin="8dp"
+                android:gravity="center_horizontal"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/btnWidgetMapZoomIn"
+                    android:layout_width="30dp"
+                    android:layout_height="30dp"
+                    android:background="@drawable/bg_widget_map_ctrl_light"
+                    android:contentDescription="@string/widget_map_zoom_in_desc"
+                    android:gravity="center"
+                    android:text="+"
+                    android:textColor="#1F1F1F"
+                    android:textSize="17sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/btnWidgetMapZoomOut"
+                    android:layout_width="30dp"
+                    android:layout_height="30dp"
+                    android:layout_marginTop="5dp"
+                    android:background="@drawable/bg_widget_map_ctrl_light"
+                    android:contentDescription="@string/widget_map_zoom_out_desc"
+                    android:gravity="center"
+                    android:text="−"
+                    android:textColor="#1F1F1F"
+                    android:textSize="17sp"
+                    android:textStyle="bold" />
+
+                <FrameLayout
+                    android:id="@+id/btnWidgetMapMyLocation"
+                    android:layout_width="30dp"
+                    android:layout_height="30dp"
+                    android:layout_marginTop="5dp"
+                    android:background="@drawable/bg_widget_map_ctrl_light"
+                    android:contentDescription="@string/widget_map_my_location_desc">
+
+                    <ImageView
+                        android:id="@+id/ivWidgetMapMyLocationIcon"
+                        android:layout_width="16dp"
+                        android:layout_height="16dp"
+                        android:layout_gravity="center"
+                        android:contentDescription="@string/widget_map_my_location_desc"
+                        android:src="@drawable/ic_my_location"
+                        android:tint="#146C2E" />
+                </FrameLayout>
+            </LinearLayout>
+        </FrameLayout>
+    </FrameLayout>
+
+    <!-- Action Dock: Active spot (Navigate, In-place Save New, Share) -->
     <LinearLayout
+        android:id="@+id/layoutWidgetActionsActive"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="8dp"
-        android:orientation="horizontal">
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:visibility="gone">
 
-        <Button
-            android:id="@+id/btnWidgetSaveSpot"
-            android:layout_width="0dp"
-            android:layout_height="36dp"
-            android:layout_weight="1"
-            android:background="@drawable/bg_widget_button_primary"
-            android:stateListAnimator="@null"
-            android:text="@string/widget_save_spot"
-            android:textAllCaps="false"
-            android:textColor="@color/ps_on_primary"
-            android:textSize="12sp"
-            android:textStyle="bold" />
-
-        <Button
+        <LinearLayout
             android:id="@+id/btnWidgetNavigate"
             android:layout_width="0dp"
-            android:layout_height="36dp"
+            android:layout_height="38dp"
+            android:layout_weight="1.25"
+            android:background="@drawable/bg_widget_button_primary"
+            android:gravity="center"
+            android:orientation="horizontal"
+            android:paddingEnd="10dp"
+            android:paddingStart="10dp">
+
+            <ImageView
+                android:id="@+id/ivWidgetNavigateIcon"
+                android:layout_width="15dp"
+                android:layout_height="15dp"
+                android:contentDescription="@string/widget_navigate"
+                android:src="@drawable/ic_directions"
+                android:tint="@color/ps_on_primary" />
+
+            <TextView
+                android:id="@+id/tvWidgetNavigateLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:maxLines="1"
+                android:text="@string/widget_navigate"
+                android:textColor="@color/ps_on_primary"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/btnWidgetUpdateSpot"
+            android:layout_width="0dp"
+            android:layout_height="38dp"
+            android:layout_marginStart="8dp"
+            android:layout_weight="1.05"
+            android:background="@drawable/bg_widget_button_tonal"
+            android:gravity="center"
+            android:orientation="horizontal"
+            android:paddingEnd="8dp"
+            android:paddingStart="8dp">
+
+            <ImageView
+                android:id="@+id/ivWidgetUpdateIcon"
+                android:layout_width="15dp"
+                android:layout_height="15dp"
+                android:contentDescription="@string/widget_new_spot"
+                android:src="@drawable/ic_my_location"
+                android:tint="@color/ps_primary" />
+
+            <TextView
+                android:id="@+id/tvWidgetUpdateLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="5dp"
+                android:maxLines="1"
+                android:text="@string/widget_new_spot"
+                android:textColor="@color/ps_text_primary"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <FrameLayout
+            android:id="@+id/btnWidgetShare"
+            android:layout_width="40dp"
+            android:layout_height="38dp"
+            android:layout_marginStart="8dp"
+            android:background="@drawable/bg_widget_button_tonal"
+            android:contentDescription="@string/share">
+
+            <ImageView
+                android:id="@+id/ivWidgetShareIcon"
+                android:layout_width="17dp"
+                android:layout_height="17dp"
+                android:layout_gravity="center"
+                android:contentDescription="@string/share"
+                android:src="@drawable/ic_share"
+                android:tint="@color/ps_text_primary" />
+        </FrameLayout>
+    </LinearLayout>
+
+    <!-- Action Dock: Empty state (In-place Save Spot, Scan QR) -->
+    <LinearLayout
+        android:id="@+id/layoutWidgetActionsEmpty"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <LinearLayout
+            android:id="@+id/btnWidgetSaveSpot"
+            android:layout_width="0dp"
+            android:layout_height="38dp"
+            android:layout_weight="1.25"
+            android:background="@drawable/bg_widget_button_primary"
+            android:gravity="center"
+            android:orientation="horizontal"
+            android:paddingEnd="10dp"
+            android:paddingStart="10dp">
+
+            <ImageView
+                android:id="@+id/ivWidgetSaveSpotIcon"
+                android:layout_width="15dp"
+                android:layout_height="15dp"
+                android:contentDescription="@string/widget_save_spot"
+                android:src="@drawable/ic_my_location"
+                android:tint="@color/ps_on_primary" />
+
+            <TextView
+                android:id="@+id/tvWidgetSaveSpotLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:maxLines="1"
+                android:text="@string/widget_save_spot"
+                android:textColor="@color/ps_on_primary"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/btnWidgetScanQrEmpty"
+            android:layout_width="0dp"
+            android:layout_height="38dp"
             android:layout_marginStart="8dp"
             android:layout_weight="1"
-            android:background="@drawable/bg_widget_button_secondary"
-            android:stateListAnimator="@null"
-            android:text="@string/widget_navigate"
-            android:textAllCaps="false"
-            android:textColor="@color/ps_text_primary"
-            android:textSize="12sp"
-            android:textStyle="bold"
-            android:visibility="gone" />
+            android:background="@drawable/bg_widget_button_tonal"
+            android:gravity="center"
+            android:orientation="horizontal"
+            android:paddingEnd="10dp"
+            android:paddingStart="10dp">
+
+            <ImageView
+                android:id="@+id/ivWidgetScanQrEmptyIcon"
+                android:layout_width="15dp"
+                android:layout_height="15dp"
+                android:contentDescription="@string/scan_parking_qr"
+                android:src="@drawable/ic_qr_code"
+                android:tint="@color/ps_primary" />
+
+            <TextView
+                android:id="@+id/tvWidgetScanQrEmptyLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:maxLines="1"
+                android:text="@string/widget_scan_qr"
+                android:textColor="@color/ps_text_primary"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+        </LinearLayout>
     </LinearLayout>
+
 </LinearLayout>

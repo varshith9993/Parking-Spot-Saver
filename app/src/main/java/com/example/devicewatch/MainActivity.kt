@@ -17,6 +17,7 @@ import com.example.devicewatch.location.ParkingLocationManager
 import com.example.devicewatch.sensor.ShakeDetector
 import com.example.devicewatch.sensor.ShakeMonitorService
 import com.example.devicewatch.storage.ParkingStorage
+import com.example.devicewatch.widget.ParkingSpotWidgetProvider
 
 class MainActivity : AppCompatActivity() {
 
@@ -28,6 +29,7 @@ class MainActivity : AppCompatActivity() {
         private const val TAG_SETTINGS = "tab_settings"
         const val EXTRA_OPEN_HOME = "extra_open_home"
         const val EXTRA_WIDGET_SAVE_SPOT = "extra_widget_save_spot"
+        const val EXTRA_WIDGET_OPEN_QR = "extra_widget_open_qr"
     }
 
     private lateinit var binding: ActivityMainBinding
@@ -71,7 +73,9 @@ class MainActivity : AppCompatActivity() {
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        if (intent.getBooleanExtra(EXTRA_WIDGET_SAVE_SPOT, false)) {
+        if (intent.getBooleanExtra(EXTRA_WIDGET_SAVE_SPOT, false) ||
+            intent.getBooleanExtra(EXTRA_WIDGET_OPEN_QR, false)
+        ) {
             handleWidgetLaunchIntent(intent)
         } else if (intent.getBooleanExtra(EXTRA_OPEN_HOME, false)) {
             binding.bottomNav.selectedItemId = R.id.nav_home
@@ -80,11 +84,21 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun handleWidgetLaunchIntent(launchIntent: android.content.Intent?) {
-        if (launchIntent?.getBooleanExtra(EXTRA_WIDGET_SAVE_SPOT, false) != true) return
+        if (launchIntent == null) return
+        val saveSpot = launchIntent.getBooleanExtra(EXTRA_WIDGET_SAVE_SPOT, false)
+        val openQr = launchIntent.getBooleanExtra(EXTRA_WIDGET_OPEN_QR, false)
+        if (!saveSpot && !openQr) return
+
         launchIntent.removeExtra(EXTRA_WIDGET_SAVE_SPOT)
+        launchIntent.removeExtra(EXTRA_WIDGET_OPEN_QR)
         binding.bottomNav.selectedItemId = R.id.nav_home
         binding.root.post {
-            (supportFragmentManager.findFragmentByTag(TAG_HOME) as? HomeFragment)?.triggerGpsSaveFromExternal()
+            val home = supportFragmentManager.findFragmentByTag(TAG_HOME) as? HomeFragment ?: return@post
+            if (saveSpot) {
+                home.triggerGpsSaveFromExternal()
+            } else if (openQr) {
+                home.triggerQrScanFromExternal()
+            }
         }
     }
 
@@ -218,6 +232,7 @@ class MainActivity : AppCompatActivity() {
             ShakeMonitorService.savedSpotInBackground = false
             notifyParkingDataChanged()
         }
+        ParkingSpotWidgetProvider.updateAllWidgets(this)
     }
 
     override fun onPause() {

@@ -99,6 +99,7 @@ class SettingsFragment : Fragment() {
             if (parkingStorage.getThemeMode() != mode) {
                 parkingStorage.setThemeMode(mode)
                 AppCompatDelegate.setDefaultNightMode(mode)
+                com.example.devicewatch.widget.ParkingSpotWidgetProvider.updateAllWidgets(requireContext())
             }
         }
 
@@ -144,6 +145,11 @@ class SettingsFragment : Fragment() {
             }
             parkingStorage.setShakeSensitivity(next)
             (activity as? MainActivity)?.updateShakeConfigFromSettings()
+        }
+
+        binding.switchSettingsQrAutoFlash.setOnCheckedChangeListener { _, isChecked ->
+            if (isUpdatingControls) return@setOnCheckedChangeListener
+            parkingStorage.setQrAutoFlashEnabled(isChecked)
         }
 
         binding.btnSettingsClearCurrent.setOnClickListener { confirmClearCurrentSpot() }
@@ -279,6 +285,7 @@ class SettingsFragment : Fragment() {
                 binding.btnSettingsShakeCooldown.text = cooldownLabel
                 binding.tvSettingsShakeDesc.text = getString(R.string.shake_desc_format, cooldownLabel)
             }
+            binding.switchSettingsQrAutoFlash.isChecked = parkingStorage.isQrAutoFlashEnabled()
         } finally {
             isUpdatingControls = false
         }
