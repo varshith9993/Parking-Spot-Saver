@@ -172,7 +172,8 @@
     <string name="open_device_location_settings">Open Device Location Settings</string>
 
     <string name="shake_title">Shake to Save</string>
-    <string name="shake_desc">Requires 1s of continuous shaking (10s cooldown) to save your current GPS spot to History, even in the background when enabled.</string>
+    <string name="shake_desc">Requires 1s of continuous shaking to save your current GPS spot to History, even in the background when enabled.</string>
+    <string name="shake_desc_format">Requires 1s of continuous shaking (%1$s cooldown) to save your current GPS spot to History.</string>
     <string name="shake_unavailable">Accelerometer unavailable on this device.</string>
     <string name="shake_sensitivity_label">Sensitivity</string>
     <string name="shake_sensitivity_normal">Normal</string>
@@ -181,11 +182,14 @@
     <string name="shake_detecting_gps">Shake detected — acquiring GPS…</string>
     <string name="shake_service_channel_name">Background Shake Detection</string>
     <string name="shake_alert_channel_name">Shake Spot Saved Alerts</string>
-    <string name="shake_notif_title">Shake to Save active</string>
-    <string name="shake_notif_text">Shake continuously for 1s to save your parking location.</string>
-    <string name="shake_saved_notif_title">Parking spot saved to History</string>
-    <string name="shake_saved_notif_text">Saved at %1$s</string>
-    <string name="shake_failed_notif_text">Shake detected, but GPS location was unavailable.</string>
+    <string name="shake_notif_title">Background Shake to Save active</string>
+    <string name="shake_notif_text">Shake continuously for 1s anytime to save your parking location.</string>
+    <string name="shake_notif_text_format">Shake continuously for 1s anytime to save your spot (%1$s cooldown).</string>
+    <string name="shake_saved_notif_title">Parking spot saved</string>
+    <string name="shake_saved_notif_coords_text">Saved to History at %1$s (%2$s). Looking up street address — tap to view on map.</string>
+    <string name="shake_saved_notif_text">Parked near %1$s at %2$s. Saved to History — tap to view spot or add a photo.</string>
+    <string name="shake_failed_notif_title">Couldn\'t save parking spot</string>
+    <string name="shake_failed_notif_text">Shake detected, but GPS location was unavailable. Check Location settings or drop a pin in the app.</string>
     <string name="shake_bg_location_needed">Grant location permission so background Shake to Save can record your spot.</string>
 
     <!-- Multi-Photo, Camera & Explicit Save -->
@@ -259,4 +263,37 @@
     <string name="all_data_deleted">All parking data cleared</string>
     <string name="current_spot_cleared">Active parking spot cleared</string>
     <string name="history_cleared">Parking history cleared</string>
+
+    <!-- Background Shake Opt-In & Cooldown -->
+    <string name="shake_background_title">Shake when app is closed</string>
+    <string name="shake_background_desc">Keep 1s shake detection running in the background while the app is minimized (shows a low-priority notification).</string>
+    <string name="shake_cooldown_label">Shake cooldown</string>
+    <string name="shake_cooldown_dialog_title">Choose shake cooldown</string>
+    <string name="cooldown_3_sec">3 sec</string>
+    <string name="cooldown_5_sec">5 sec</string>
+    <string name="cooldown_10_sec">10 sec</string>
+    <string name="cooldown_20_sec">20 sec</string>
+    <string name="cooldown_30_sec">30 sec</string>
+    <string name="cooldown_1_min">1 min</string>
+    <string name="cooldown_2_min">2 min</string>
+    <string name="cooldown_5_min">5 min</string>
+
+    <!-- QR Scanner -->
+    <string name="scan_parking_qr">Scan Parking QR</string>
+    <string name="scan_parking_qr_desc">Scan a parking bay or map QR code to fill Home form</string>
+    <string name="qr_scanner_title">Scan Parking QR</string>
+    <string name="qr_scanner_hint">Align a parking spot, bay, or map QR code inside the frame</string>
+    <string name="qr_torch_toggle">Toggle flashlight</string>
+    <string name="qr_camera_permission_denied">Camera permission is needed to scan parking QR codes.</string>
+    <string name="qr_scan_filled_coords">QR location filled — review and tap Save New Spot</string>
+    <string name="qr_scan_filled_label">QR spot details filled into label/note</string>
+    <string name="qr_scan_empty_or_invalid">Could not read parking details from that QR code.</string>
+
+    <!-- Home Screen Widget -->
+    <string name="widget_name">Parking Spot</string>
+    <string name="widget_description">View your saved parking spot and save or navigate in one tap.</string>
+    <string name="widget_no_spot_title">No active parking spot</string>
+    <string name="widget_no_spot_subtitle">Tap Save Spot when parked to record your location.</string>
+    <string name="widget_save_spot">Save Spot</string>
+    <string name="widget_navigate">Navigate</string>
 </resources>

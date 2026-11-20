@@ -19,4 +19,7 @@
     <color name="ps_denied_bg">#FCE8E6</color>
     <color name="ps_denied_text">#C5221F</color>
     <color name="ps_drag_handle">#D1D5DB</color>
+    <color name="ps_switch_track_off">#E2E7EC</color>
+    <color name="ps_switch_thumb_off">#5F6368</color>
+    <color name="ps_switch_outline_off">#9AA0A6</color>
 </resources>

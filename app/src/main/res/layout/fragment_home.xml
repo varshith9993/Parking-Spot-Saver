@@ -249,6 +249,30 @@
                 android:src="@drawable/ic_pin_drop"
                 app:tint="@color/ps_primary" />
         </com.google.android.material.card.MaterialCardView>
+
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/cardQrScanControl"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:layout_gravity="end"
+            android:layout_marginTop="10dp"
+            app:cardBackgroundColor="@color/ps_card_bg"
+            app:cardCornerRadius="12dp"
+            app:cardElevation="2dp"
+            app:strokeColor="@color/ps_card_stroke"
+            app:strokeWidth="1dp">
+
+            <ImageButton
+                android:id="@+id/btnScanQr"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/scan_parking_qr"
+                android:padding="10dp"
+                android:scaleType="centerInside"
+                android:src="@drawable/ic_qr_code"
+                app:tint="@color/ps_primary" />
+        </com.google.android.material.card.MaterialCardView>
     </LinearLayout>
 
     <!-- Map Attribution Pill Anchored Above Bottom Sheet -->

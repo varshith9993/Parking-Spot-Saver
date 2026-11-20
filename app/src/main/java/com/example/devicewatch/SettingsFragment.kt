@@ -116,6 +116,12 @@ class SettingsFragment : Fragment() {
             if (isUpdatingControls) return@setOnCheckedChangeListener
             parkingStorage.setShakeToSaveEnabled(isChecked)
             binding.layoutSettingsShakeSensitivity.visibility = if (isChecked) View.VISIBLE else View.GONE
+            (activity as? MainActivity)?.updateShakeConfigFromSettings()
+        }
+
+        binding.switchSettingsShakeBackground.setOnCheckedChangeListener { _, isChecked ->
+            if (isUpdatingControls) return@setOnCheckedChangeListener
+            parkingStorage.setBackgroundShakeEnabled(isChecked)
             if (isChecked) {
                 val hasLoc = isGranted(Manifest.permission.ACCESS_FINE_LOCATION) ||
                     isGranted(Manifest.permission.ACCESS_COARSE_LOCATION)
@@ -126,6 +132,8 @@ class SettingsFragment : Fragment() {
             }
             (activity as? MainActivity)?.updateShakeConfigFromSettings()
         }
+
+        binding.btnSettingsShakeCooldown.setOnClickListener { showCooldownPickerDialog() }
 
         binding.toggleSettingsSensitivity.addOnButtonCheckedListener { _, checkedId, isChecked ->
             if (isUpdatingControls || !isChecked) return@addOnButtonCheckedListener
@@ -255,6 +263,7 @@ class SettingsFragment : Fragment() {
                 val enabled = parkingStorage.isShakeToSaveEnabled()
                 binding.switchSettingsShake.isEnabled = true
                 binding.switchSettingsShake.isChecked = enabled
+                binding.switchSettingsShakeBackground.isChecked = parkingStorage.isBackgroundShakeEnabled()
                 binding.layoutSettingsShakeSensitivity.visibility = if (enabled) View.VISIBLE else View.GONE
 
                 val sensitivityId = if (parkingStorage.getShakeSensitivity() == ShakeDetector.SENSITIVITY_HIGH) {
@@ -263,10 +272,36 @@ class SettingsFragment : Fragment() {
                     R.id.btnSettingsSensitivityNormal
                 }
                 binding.toggleSettingsSensitivity.check(sensitivityId)
+                val cooldownLabel = ParkingUiHelper.formatCooldownLabel(
+                    requireContext(),
+                    parkingStorage.getShakeCooldownMs()
+                )
+                binding.btnSettingsShakeCooldown.text = cooldownLabel
+                binding.tvSettingsShakeDesc.text = getString(R.string.shake_desc_format, cooldownLabel)
             }
         } finally {
             isUpdatingControls = false
         }
+    }
+
+    private fun showCooldownPickerDialog() {
+        val options = ParkingStorage.SHAKE_COOLDOWN_OPTIONS_MS
+        val labels = options.map { ParkingUiHelper.formatCooldownLabel(requireContext(), it) }.toTypedArray()
+        val currentMs = parkingStorage.getShakeCooldownMs()
+        val checkedIdx = options.indexOfFirst { it == currentMs }.coerceAtLeast(0)
+
+        MaterialAlertDialogBuilder(requireContext())
+            .setTitle(R.string.shake_cooldown_dialog_title)
+            .setSingleChoiceItems(labels, checkedIdx) { dialog, which ->
+                val selectedMs = options[which]
+                parkingStorage.setShakeCooldownMs(selectedMs)
+                binding.btnSettingsShakeCooldown.text = labels[which]
+                binding.tvSettingsShakeDesc.text = getString(R.string.shake_desc_format, labels[which])
+                (activity as? MainActivity)?.updateShakeConfigFromSettings()
+                dialog.dismiss()
+            }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
     }
 
     private fun updateDataManagementButtons() {

@@ -174,6 +174,35 @@ public final class NavigationManager {
         return sb.toString();
     }
 
+    @Nullable
+    public static Intent buildBestDirectionsIntent(
+            @NonNull Context context,
+            @Nullable ParkingSpot spot,
+            @NonNull String travelMode
+    ) {
+        if (spot == null || !DistanceCalculator.isValidCoordinate(spot.getLatitude(), spot.getLongitude())) {
+            return null;
+        }
+        String navModeFlag = TRAVEL_DRIVING.equals(travelMode) ? "d" : "w";
+        String navWithMode = String.format(
+                Locale.US,
+                "google.navigation:q=%.6f,%.6f&mode=%s",
+                spot.getLatitude(), spot.getLongitude(), navModeFlag
+        );
+        Intent gmapsNav = new Intent(Intent.ACTION_VIEW, Uri.parse(navWithMode))
+                .setPackage(GOOGLE_MAPS_PACKAGE);
+        if (gmapsNav.resolveActivity(context.getPackageManager()) != null) {
+            return gmapsNav;
+        }
+        String webDirections = String.format(
+                Locale.US,
+                "https://www.google.com/maps/dir/?api=1&destination=%.6f,%.6f&travelmode=%s",
+                spot.getLatitude(), spot.getLongitude(),
+                TRAVEL_DRIVING.equals(travelMode) ? TRAVEL_DRIVING : TRAVEL_WALKING
+        );
+        return new Intent(Intent.ACTION_VIEW, Uri.parse(webDirections));
+    }
+
     private static boolean tryStartActivity(@NonNull Context context, @NonNull Intent intent) {
         try {
             if (!(context instanceof Activity)) {

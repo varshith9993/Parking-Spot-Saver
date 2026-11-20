@@ -21,6 +21,7 @@ public class ShakeDetector implements SensorEventListener {
 
     public static final int SENSITIVITY_NORMAL = 0;
     public static final int SENSITIVITY_HIGH = 1;
+    public static final long DEFAULT_COOLDOWN_MS = 10_000L;
 
     private static final float NORMAL_G_THRESHOLD = 2.0f;
     private static final float HIGH_G_THRESHOLD = 1.6f;
@@ -29,7 +30,6 @@ public class ShakeDetector implements SensorEventListener {
     private static final int HIGH_MIN_IMPULSES = 3;
     private static final long MIN_IMPULSE_GAP_MS = 100L;
     private static final long MAX_PAUSE_BETWEEN_IMPULSES_MS = 450L;
-    private static final long COOLDOWN_MS = 10_000L;
 
     @Nullable
     private final SensorManager sensorManager;
@@ -39,11 +39,13 @@ public class ShakeDetector implements SensorEventListener {
     private final OnShakeListener listener;
 
     private int sensitivity = SENSITIVITY_NORMAL;
+    private long cooldownMs = DEFAULT_COOLDOWN_MS;
     private boolean isRegistered = false;
     private long shakeStartTimeMs = 0L;
     private long lastImpulseTimeMs = 0L;
     private long lastCountedImpulseTimeMs = 0L;
     private int impulseCount = 0;
+    private long lastTriggeredTimeMs = 0L;
     private long cooldownUntilMs = 0L;
 
     public ShakeDetector(@NonNull Context context, @NonNull OnShakeListener listener) {
@@ -71,6 +73,27 @@ public class ShakeDetector implements SensorEventListener {
     public void setSensitivity(int sensitivity) {
         this.sensitivity = sensitivity == SENSITIVITY_HIGH ? SENSITIVITY_HIGH : SENSITIVITY_NORMAL;
         resetShakeState();
+    }
+
+    public void setCooldownMs(long cooldownMs) {
+        long normalized = Math.max(1000L, cooldownMs);
+        this.cooldownMs = normalized;
+        if (lastTriggeredTimeMs > 0L) {
+            this.cooldownUntilMs = lastTriggeredTimeMs + normalized;
+        }
+    }
+
+    /**
+     * Restores the last trigger timestamp so cooldown stays accurate across UI/service switches.
+     */
+    public void setLastTriggeredTimeMs(long lastTriggeredTimeMs, long nowMs) {
+        if (lastTriggeredTimeMs <= 0L || lastTriggeredTimeMs > nowMs) {
+            this.lastTriggeredTimeMs = 0L;
+            this.cooldownUntilMs = 0L;
+            return;
+        }
+        this.lastTriggeredTimeMs = lastTriggeredTimeMs;
+        this.cooldownUntilMs = lastTriggeredTimeMs + this.cooldownMs;
     }
 
     public void start() {
@@ -139,7 +162,8 @@ public class ShakeDetector implements SensorEventListener {
 
         int minImpulses = sensitivity == SENSITIVITY_HIGH ? HIGH_MIN_IMPULSES : NORMAL_MIN_IMPULSES;
         if ((nowMs - shakeStartTimeMs) >= REQUIRED_SHAKE_DURATION_MS && impulseCount >= minImpulses) {
-            cooldownUntilMs = nowMs + COOLDOWN_MS;
+            lastTriggeredTimeMs = nowMs;
+            cooldownUntilMs = nowMs + cooldownMs;
             resetShakeState();
             listener.onShakeDetected();
             return true;

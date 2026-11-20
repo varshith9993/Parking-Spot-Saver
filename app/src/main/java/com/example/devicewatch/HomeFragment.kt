@@ -30,6 +30,7 @@ import com.example.devicewatch.databinding.FragmentHomeBinding
 import com.example.devicewatch.location.DistanceCalculator
 import com.example.devicewatch.location.NativeGeocoder
 import com.example.devicewatch.location.ParkingLocationManager
+import com.example.devicewatch.location.ParkingQrParser
 import com.example.devicewatch.model.ParkingPhotoItem
 import com.example.devicewatch.model.ParkingRecord
 import com.example.devicewatch.storage.ParkingPhotoManager
@@ -52,6 +53,11 @@ class HomeFragment : Fragment() {
         NONE,
         SAVE_GPS_SPOT,
         CENTER_MY_LOCATION
+    }
+
+    private enum class PendingCameraAction {
+        PHOTO,
+        QR
     }
 
     companion object {
@@ -88,6 +94,7 @@ class HomeFragment : Fragment() {
     private var activeRecord: ParkingRecord? = null
     private var latestUserLocation: Location? = null
     private var pendingAction = PendingPermissionAction.NONE
+    private var pendingCameraAction = PendingCameraAction.PHOTO
     private var pendingShakeConfirmation = false
     private var pendingSaveToSavedList = false
     private var isSaveInProgress = false
@@ -154,11 +161,32 @@ class HomeFragment : Fragment() {
         ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (!isAdded || _binding == null) return@registerForActivityResult
+        val action = pendingCameraAction
+        pendingCameraAction = PendingCameraAction.PHOTO
         if (granted) {
-            openCameraCaptureActivity()
+            when (action) {
+                PendingCameraAction.PHOTO -> openCameraCaptureActivity()
+                PendingCameraAction.QR -> openQrScannerActivity()
+            }
         } else {
-            Toast.makeText(requireContext(), R.string.camera_permission_denied, Toast.LENGTH_LONG).show()
+            val msgRes = if (action == PendingCameraAction.QR) {
+                R.string.qr_camera_permission_denied
+            } else {
+                R.string.camera_permission_denied
+            }
+            Toast.makeText(requireContext(), msgRes, Toast.LENGTH_LONG).show()
         }
+    }
+
+    private val qrScannerLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (!isAdded || _binding == null || result.resultCode != Activity.RESULT_OK) {
+            return@registerForActivityResult
+        }
+        val rawText = result.data?.getStringExtra(QrScannerActivity.EXTRA_QR_RAW_TEXT)
+            ?: return@registerForActivityResult
+        applyScannedQrResult(rawText)
     }
 
     private val gpsResolutionLauncher = registerForActivityResult(
@@ -462,6 +490,7 @@ class HomeFragment : Fragment() {
         binding.btnManualPinMode.setOnClickListener {
             if (isPinSelectionMode) exitPinSelectionMode() else enterPinSelectionMode()
         }
+        binding.btnScanQr.setOnClickListener { launchQrScannerFlow() }
 
         binding.btnHomeSaveNewSpot.setOnClickListener {
             saveHomeForm()
@@ -484,11 +513,19 @@ class HomeFragment : Fragment() {
         binding.btnHomeClearAll.setOnClickListener { confirmClearHomeForm() }
     }
 
-    fun triggerSaveFromShake() {
-        if (!isAdded || _binding == null || isSaveInProgress || isPinSelectionMode) return
+    fun triggerSaveFromShake(): Boolean {
+        if (!isAdded || _binding == null || isSaveInProgress || isPinSelectionMode) return false
         performShakeHapticFeedback(confirmed = false)
         Toast.makeText(requireContext(), R.string.shake_detecting_gps, Toast.LENGTH_SHORT).show()
         pendingShakeConfirmation = true
+        pendingSaveToSavedList = false
+        startGpsSaveFlow()
+        return true
+    }
+
+    fun triggerGpsSaveFromExternal() {
+        if (!isAdded || _binding == null || isSaveInProgress || isPinSelectionMode) return
+        pendingShakeConfirmation = false
         pendingSaveToSavedList = false
         startGpsSaveFlow()
     }
@@ -744,7 +781,8 @@ class HomeFragment : Fragment() {
         ParkingUiHelper.showChangeLocationBottomSheet(
             context = requireContext(),
             onUseCurrentGps = { fetchGpsLocationIntoForm(showLoading = true) },
-            onChooseOnMap = { enterPinSelectionMode() }
+            onChooseOnMap = { enterPinSelectionMode() },
+            onScanQr = { launchQrScannerFlow() }
         )
     }
 
@@ -1149,6 +1187,21 @@ class HomeFragment : Fragment() {
     }
 
     private fun launchCameraCaptureFlow() {
+        launchWithCameraPermission(PendingCameraAction.PHOTO) {
+            openCameraCaptureActivity()
+        }
+    }
+
+    private fun launchQrScannerFlow() {
+        launchWithCameraPermission(PendingCameraAction.QR) {
+            openQrScannerActivity()
+        }
+    }
+
+    private fun launchWithCameraPermission(
+        action: PendingCameraAction,
+        onGranted: () -> Unit
+    ) {
         val pm = requireContext().packageManager
         if (!pm.hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY)) {
             Toast.makeText(requireContext(), R.string.camera_unavailable, Toast.LENGTH_SHORT).show()
@@ -1159,14 +1212,71 @@ class HomeFragment : Fragment() {
             Manifest.permission.CAMERA
         ) == PackageManager.PERMISSION_GRANTED
         if (granted) {
-            openCameraCaptureActivity()
+            onGranted()
         } else {
+            pendingCameraAction = action
             cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
         }
     }
 
     private fun openCameraCaptureActivity() {
         cameraCaptureLauncher.launch(Intent(requireContext(), CameraCaptureActivity::class.java))
+    }
+
+    private fun openQrScannerActivity() {
+        qrScannerLauncher.launch(Intent(requireContext(), QrScannerActivity::class.java))
+    }
+
+    private fun applyScannedQrResult(rawText: String) {
+        val parsed = ParkingQrParser.parse(rawText)
+        if (parsed == null) {
+            Toast.makeText(requireContext(), R.string.qr_scan_empty_or_invalid, Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        if (isPinSelectionMode) {
+            exitPinSelectionMode()
+        }
+
+        val lat = parsed.latitude
+        val lng = parsed.longitude
+        if (parsed.hasCoordinates && lat != null && lng != null &&
+            DistanceCalculator.isValidCoordinate(lat, lng)
+        ) {
+            draftLatLng = LatLng(lat, lng)
+            draftAddress = parsed.address
+            if (!parsed.placeLabel.isNullOrBlank()) {
+                draftPlaceLabel = parsed.placeLabel
+            }
+            if (!parsed.note.isNullOrBlank()) {
+                draftNote = parsed.note
+            }
+            isAutoDefaultGpsLocation = false
+            formTimestamp = System.currentTimeMillis()
+            hasUnsavedFormChanges = true
+            renderSheetState(focusMap = true)
+            if (draftAddress.isNullOrBlank()) {
+                resolveFormAddressAsync(lat, lng)
+            }
+            Toast.makeText(requireContext(), R.string.qr_scan_filled_coords, Toast.LENGTH_LONG).show()
+        } else {
+            if (!parsed.placeLabel.isNullOrBlank()) {
+                draftPlaceLabel = parsed.placeLabel
+            }
+            if (!parsed.note.isNullOrBlank()) {
+                draftNote = parsed.note
+            }
+            if (!parsed.address.isNullOrBlank()) {
+                draftAddress = parsed.address
+            }
+            isAutoDefaultGpsLocation = false
+            if (formTimestamp <= 0L) {
+                formTimestamp = System.currentTimeMillis()
+            }
+            hasUnsavedFormChanges = true
+            renderSheetState(focusMap = false)
+            Toast.makeText(requireContext(), R.string.qr_scan_filled_label, Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun launchGalleryPicker(remainingSlots: Int) {

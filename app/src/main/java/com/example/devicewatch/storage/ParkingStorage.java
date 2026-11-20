@@ -14,6 +14,7 @@ import com.example.devicewatch.model.ParkingRecord;
 import com.example.devicewatch.model.ParkingSpot;
 import com.example.devicewatch.navigation.NavigationManager;
 import com.example.devicewatch.sensor.ShakeDetector;
+import com.example.devicewatch.widget.ParkingSpotWidgetProvider;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -56,13 +57,22 @@ public class ParkingStorage {
     private static final String KEY_MIGRATION_V2_DONE = "sqlite_migration_v2_done";
 
     private static final String KEY_SHAKE_ENABLED = "shake_to_save_enabled";
+    private static final String KEY_SHAKE_BACKGROUND_ENABLED = "shake_background_enabled";
     private static final String KEY_SHAKE_SENSITIVITY = "shake_to_save_sensitivity";
+    private static final String KEY_SHAKE_COOLDOWN_MS = "shake_to_save_cooldown_ms";
+    private static final String KEY_LAST_SHAKE_TRIGGER_MS = "shake_last_trigger_ms";
     private static final String KEY_THEME_MODE = "appearance_theme_mode";
     private static final String KEY_NAV_TRAVEL_MODE = "nav_travel_mode";
 
+    public static final long[] SHAKE_COOLDOWN_OPTIONS_MS = {
+            3_000L, 5_000L, 10_000L, 20_000L, 30_000L, 60_000L, 120_000L, 300_000L
+    };
+
     private static final Object MIGRATION_LOCK = new Object();
+    private static final Object SHAKE_COOLDOWN_LOCK = new Object();
     private static volatile ParkingDatabaseHelper sharedDbHelper;
 
+    private final Context appContext;
     private final SharedPreferences prefs;
     private final SharedPreferences legacyHistoryPrefs;
     private final SharedPreferences settingsPrefs;
@@ -70,6 +80,7 @@ public class ParkingStorage {
 
     public ParkingStorage(@NonNull Context context) {
         Context appContext = context.getApplicationContext();
+        this.appContext = appContext;
         this.prefs = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
         this.legacyHistoryPrefs = appContext.getSharedPreferences(LEGACY_HISTORY_PREFS, Context.MODE_PRIVATE);
         this.settingsPrefs = appContext.getSharedPreferences(SETTINGS_PREFS_NAME, Context.MODE_PRIVATE);
@@ -132,11 +143,13 @@ public class ParkingStorage {
     public void saveNewActiveRecord(@NonNull ParkingRecord newRecord) {
         db.upsertRecord(newRecord, true);
         writeActiveRecordToPrefs(newRecord);
+        ParkingSpotWidgetProvider.updateAllWidgets(appContext);
     }
 
     public void setExistingRecordAsActive(@NonNull ParkingRecord record) {
         db.upsertRecord(record, true);
         writeActiveRecordToPrefs(record);
+        ParkingSpotWidgetProvider.updateAllWidgets(appContext);
     }
 
     public void saveParkingSpot(@NonNull ParkingSpot spot) {
@@ -270,10 +283,14 @@ public class ParkingStorage {
                 ? placeLabel.trim()
                 : null;
         ParkingRecord active = getActiveRecord();
-        if (active != null && active.getId().equals(recordId)) {
+        boolean isActive = active != null && active.getId().equals(recordId);
+        if (isActive) {
             prefs.edit().putString(KEY_PLACE_LABEL, normalized).apply();
         }
         db.updatePlaceLabel(recordId, normalized);
+        if (isActive) {
+            ParkingSpotWidgetProvider.updateAllWidgets(appContext);
+        }
     }
 
     public void updateActiveAddress(@Nullable String address) {
@@ -286,10 +303,14 @@ public class ParkingStorage {
 
     public void updateRecordAddress(@NonNull String recordId, @Nullable String address) {
         ParkingRecord active = getActiveRecord();
-        if (active != null && active.getId().equals(recordId)) {
+        boolean isActive = active != null && active.getId().equals(recordId);
+        if (isActive) {
             prefs.edit().putString(KEY_ADDRESS, address).apply();
         }
         db.updateAddress(recordId, address);
+        if (isActive) {
+            ParkingSpotWidgetProvider.updateAllWidgets(appContext);
+        }
     }
 
     public void updateParkingAddress(@Nullable String address) {
@@ -431,6 +452,7 @@ public class ParkingStorage {
 
     public void clearActiveSpot() {
         prefs.edit().clear().apply();
+        ParkingSpotWidgetProvider.updateAllWidgets(appContext);
     }
 
     public void clearParkingSpot() {
@@ -512,6 +534,7 @@ public class ParkingStorage {
         clearActiveSpot();
         legacyHistoryPrefs.edit().clear().apply();
         db.deleteAllRecords();
+        ParkingSpotWidgetProvider.updateAllWidgets(appContext);
     }
 
     public boolean isPhotoReferenced(@Nullable String photoPath) {
@@ -535,6 +558,66 @@ public class ParkingStorage {
 
     public void setShakeToSaveEnabled(boolean enabled) {
         settingsPrefs.edit().putBoolean(KEY_SHAKE_ENABLED, enabled).apply();
+    }
+
+    public boolean isBackgroundShakeEnabled() {
+        return settingsPrefs.getBoolean(KEY_SHAKE_BACKGROUND_ENABLED, false);
+    }
+
+    public void setBackgroundShakeEnabled(boolean enabled) {
+        settingsPrefs.edit().putBoolean(KEY_SHAKE_BACKGROUND_ENABLED, enabled).apply();
+    }
+
+    public long getShakeCooldownMs() {
+        long value = settingsPrefs.getLong(KEY_SHAKE_COOLDOWN_MS, ShakeDetector.DEFAULT_COOLDOWN_MS);
+        for (long option : SHAKE_COOLDOWN_OPTIONS_MS) {
+            if (option == value) {
+                return value;
+            }
+        }
+        return ShakeDetector.DEFAULT_COOLDOWN_MS;
+    }
+
+    public void setShakeCooldownMs(long cooldownMs) {
+        long normalized = ShakeDetector.DEFAULT_COOLDOWN_MS;
+        for (long option : SHAKE_COOLDOWN_OPTIONS_MS) {
+            if (option == cooldownMs) {
+                normalized = option;
+                break;
+            }
+        }
+        settingsPrefs.edit().putLong(KEY_SHAKE_COOLDOWN_MS, normalized).apply();
+    }
+
+    public long getLastShakeTriggerMs() {
+        return settingsPrefs.getLong(KEY_LAST_SHAKE_TRIGGER_MS, 0L);
+    }
+
+    public boolean isWithinShakeCooldown(long nowMs) {
+        synchronized (SHAKE_COOLDOWN_LOCK) {
+            long lastTrigger = getLastShakeTriggerMs();
+            if (lastTrigger <= 0L || nowMs < lastTrigger) {
+                return false;
+            }
+            return (nowMs - lastTrigger) < getShakeCooldownMs();
+        }
+    }
+
+    public boolean tryConsumeShakeCooldown(long nowMs) {
+        synchronized (SHAKE_COOLDOWN_LOCK) {
+            long lastTrigger = getLastShakeTriggerMs();
+            if (lastTrigger > 0L && nowMs >= lastTrigger && (nowMs - lastTrigger) < getShakeCooldownMs()) {
+                return false;
+            }
+            settingsPrefs.edit().putLong(KEY_LAST_SHAKE_TRIGGER_MS, nowMs).apply();
+            return true;
+        }
+    }
+
+    public void setLastShakeTriggerMs(long timestampMs) {
+        synchronized (SHAKE_COOLDOWN_LOCK) {
+            settingsPrefs.edit().putLong(KEY_LAST_SHAKE_TRIGGER_MS, Math.max(0L, timestampMs)).apply();
+        }
     }
 
     public int getShakeSensitivity() {

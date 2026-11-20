@@ -18,11 +18,14 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.example.devicewatch.MainActivity
+import com.example.devicewatch.ParkingUiHelper
 import com.example.devicewatch.R
 import com.example.devicewatch.location.NativeGeocoder
 import com.example.devicewatch.location.ParkingLocationManager
 import com.example.devicewatch.model.ParkingRecord
 import com.example.devicewatch.storage.ParkingStorage
+import java.text.DateFormat
+import java.util.Date
 import java.util.UUID
 
 /**
@@ -95,37 +98,29 @@ class ShakeMonitorService : Service() {
             return START_NOT_STICKY
         }
 
-        if (!parkingStorage.isShakeToSaveEnabled() || !shakeDetector.isAccelerometerAvailable()) {
+        if (!parkingStorage.isShakeToSaveEnabled() ||
+            !parkingStorage.isBackgroundShakeEnabled() ||
+            !shakeDetector.isAccelerometerAvailable()
+        ) {
             stopSelf()
             return START_NOT_STICKY
         }
 
+        val cooldownMs = parkingStorage.getShakeCooldownMs()
         shakeDetector.setSensitivity(parkingStorage.getShakeSensitivity())
+        shakeDetector.setCooldownMs(cooldownMs)
+        shakeDetector.setLastTriggeredTimeMs(
+            parkingStorage.getLastShakeTriggerMs(),
+            System.currentTimeMillis()
+        )
         shakeDetector.start()
+        refreshForegroundNotification(cooldownMs)
         return START_STICKY
     }
 
     private fun promoteToForeground(): Boolean {
         if (isForegroundStarted) return true
-        val launchIntent = Intent(this, MainActivity::class.java).apply {
-            addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-        }
-        val contentIntent = PendingIntent.getActivity(
-            this,
-            0,
-            launchIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-
-        val notification = NotificationCompat.Builder(this, CHANNEL_SERVICE_ID)
-            .setSmallIcon(R.drawable.ic_pin_drop)
-            .setContentTitle(getString(R.string.shake_notif_title))
-            .setContentText(getString(R.string.shake_notif_text))
-            .setOngoing(true)
-            .setSilent(true)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .setContentIntent(contentIntent)
-            .build()
+        val notification = buildForegroundNotification(parkingStorage.getShakeCooldownMs())
 
         return try {
             val fgType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -141,9 +136,51 @@ class ShakeMonitorService : Service() {
         }
     }
 
+    private fun refreshForegroundNotification(cooldownMs: Long) {
+        if (!isForegroundStarted) return
+        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
+        manager.notify(NOTIFICATION_SERVICE_ID, buildForegroundNotification(cooldownMs))
+    }
+
+    private fun buildForegroundNotification(cooldownMs: Long): android.app.Notification {
+        val launchIntent = Intent(this, MainActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        }
+        val contentIntent = PendingIntent.getActivity(
+            this,
+            0,
+            launchIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val cooldownLabel = ParkingUiHelper.formatCooldownLabel(this, cooldownMs)
+        val text = getString(R.string.shake_notif_text_format, cooldownLabel)
+
+        return NotificationCompat.Builder(this, CHANNEL_SERVICE_ID)
+            .setSmallIcon(R.drawable.ic_pin_drop)
+            .setContentTitle(getString(R.string.shake_notif_title))
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setOngoing(true)
+            .setSilent(true)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setContentIntent(contentIntent)
+            .build()
+    }
+
     private fun onBackgroundShakeDetected() {
         if (isMainForeground || isSaveInFlight) return
-        if (!parkingStorage.isShakeToSaveEnabled() || !locationManager.hasLocationPermission()) return
+        if (!parkingStorage.isShakeToSaveEnabled() ||
+            !parkingStorage.isBackgroundShakeEnabled() ||
+            !locationManager.hasLocationPermission()
+        ) {
+            return
+        }
+        val now = System.currentTimeMillis()
+        if (!parkingStorage.tryConsumeShakeCooldown(now)) {
+            shakeDetector.setLastTriggeredTimeMs(parkingStorage.getLastShakeTriggerMs(), now)
+            return
+        }
 
         isSaveInFlight = true
         locationManager.getFastLocation(object : ParkingLocationManager.LocationResultCallback {
@@ -158,10 +195,12 @@ class ShakeMonitorService : Service() {
             override fun onLocationError(message: String) {
                 isSaveInFlight = false
                 if (isServiceDestroyed) return
-                showToastOnMain(getString(R.string.shake_failed_notif_text))
+                val failBody = getString(R.string.shake_failed_notif_text)
+                showToastOnMain(failBody)
                 postSavedAlertNotification(
-                    getString(R.string.shake_notif_title),
-                    getString(R.string.shake_failed_notif_text)
+                    title = getString(R.string.shake_failed_notif_title),
+                    body = failBody,
+                    onlyAlertOnce = false
                 )
             }
         })
@@ -169,13 +208,14 @@ class ShakeMonitorService : Service() {
 
     private fun saveShakeSpot(location: Location) {
         if (isServiceDestroyed) return
+        val savedAt = System.currentTimeMillis()
         val record = ParkingRecord(
             UUID.randomUUID().toString(),
             location.latitude,
             location.longitude,
             null,
             null,
-            System.currentTimeMillis(),
+            savedAt,
             null,
             emptyList(),
             false
@@ -185,10 +225,12 @@ class ShakeMonitorService : Service() {
         isSaveInFlight = false
 
         val coords = NativeGeocoder.formatCoordinates(record.latitude, record.longitude)
+        val timeText = DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(savedAt))
         showToastOnMain(getString(R.string.shake_saved_confirmation))
         postSavedAlertNotification(
-            getString(R.string.shake_saved_notif_title),
-            getString(R.string.shake_saved_notif_text, coords)
+            title = getString(R.string.shake_saved_notif_title),
+            body = getString(R.string.shake_saved_notif_coords_text, timeText, coords),
+            onlyAlertOnce = false
         )
 
         nativeGeocoder.reverseGeocode(
@@ -199,8 +241,9 @@ class ShakeMonitorService : Service() {
                     if (isServiceDestroyed) return
                     parkingStorage.updateRecordAddress(record.id, formattedAddress)
                     postSavedAlertNotification(
-                        getString(R.string.shake_saved_notif_title),
-                        getString(R.string.shake_saved_notif_text, formattedAddress)
+                        title = getString(R.string.shake_saved_notif_title),
+                        body = getString(R.string.shake_saved_notif_text, formattedAddress, timeText),
+                        onlyAlertOnce = true
                     )
                 }
 
@@ -220,7 +263,7 @@ class ShakeMonitorService : Service() {
         }
     }
 
-    private fun postSavedAlertNotification(title: String, body: String) {
+    private fun postSavedAlertNotification(title: String, body: String, onlyAlertOnce: Boolean) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(this, android.Manifest.permission.POST_NOTIFICATIONS)
             != PackageManager.PERMISSION_GRANTED
@@ -242,6 +285,12 @@ class ShakeMonitorService : Service() {
             .setSmallIcon(R.drawable.ic_pin_drop)
             .setContentTitle(title)
             .setContentText(body)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setCategory(NotificationCompat.CATEGORY_STATUS)
+            .setShowWhen(true)
+            .setWhen(System.currentTimeMillis())
+            .setOnlyAlertOnce(onlyAlertOnce)
             .setAutoCancel(true)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setContentIntent(pendingIntent)

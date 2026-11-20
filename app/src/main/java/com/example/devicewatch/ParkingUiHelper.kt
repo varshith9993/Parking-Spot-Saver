@@ -57,6 +57,21 @@ internal object ParkingUiHelper {
     private const val MARKER_ICON_ID = "parking-spot-pin"
     const val PREVIEW_REQ_SIZE = 1440
 
+    fun formatCooldownLabel(context: Context, cooldownMs: Long): String {
+        val resId = when (cooldownMs) {
+            3_000L -> R.string.cooldown_3_sec
+            5_000L -> R.string.cooldown_5_sec
+            10_000L -> R.string.cooldown_10_sec
+            20_000L -> R.string.cooldown_20_sec
+            30_000L -> R.string.cooldown_30_sec
+            60_000L -> R.string.cooldown_1_min
+            120_000L -> R.string.cooldown_2_min
+            300_000L -> R.string.cooldown_5_min
+            else -> R.string.cooldown_10_sec
+        }
+        return context.getString(resId)
+    }
+
     fun ensureMarkerLayer(context: Context, style: Style) {
         if (style.getImage(MARKER_ICON_ID) == null) {
             val drawable = ResourcesCompat.getDrawable(
@@ -479,7 +494,8 @@ internal object ParkingUiHelper {
     fun showChangeLocationBottomSheet(
         context: Context,
         onUseCurrentGps: () -> Unit,
-        onChooseOnMap: () -> Unit
+        onChooseOnMap: () -> Unit,
+        onScanQr: (() -> Unit)? = null
     ) {
         val dialog = BottomSheetDialog(context)
         val sheetView = LayoutInflater.from(context).inflate(R.layout.bottom_sheet_change_location, null)
@@ -490,6 +506,16 @@ internal object ParkingUiHelper {
         sheetView.findViewById<View>(R.id.cardOptionChooseOnMap).setOnClickListener {
             dialog.dismiss()
             onChooseOnMap()
+        }
+        val qrCard = sheetView.findViewById<View>(R.id.cardOptionScanQr)
+        if (onScanQr != null) {
+            qrCard.visibility = View.VISIBLE
+            qrCard.setOnClickListener {
+                dialog.dismiss()
+                onScanQr()
+            }
+        } else {
+            qrCard.visibility = View.GONE
         }
         sheetView.findViewById<View>(R.id.btnChangeLocationCancel).setOnClickListener {
             dialog.dismiss()

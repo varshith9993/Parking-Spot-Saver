@@ -27,6 +27,7 @@ class MainActivity : AppCompatActivity() {
         private const val TAG_HISTORY = "tab_history"
         private const val TAG_SETTINGS = "tab_settings"
         const val EXTRA_OPEN_HOME = "extra_open_home"
+        const val EXTRA_WIDGET_SAVE_SPOT = "extra_widget_save_spot"
     }
 
     private lateinit var binding: ActivityMainBinding
@@ -64,13 +65,26 @@ class MainActivity : AppCompatActivity() {
             true
         }
         binding.bottomNav.selectedItemId = selectedTabId
+        handleWidgetLaunchIntent(intent)
     }
 
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
-        if (intent.getBooleanExtra(EXTRA_OPEN_HOME, false)) {
+        setIntent(intent)
+        if (intent.getBooleanExtra(EXTRA_WIDGET_SAVE_SPOT, false)) {
+            handleWidgetLaunchIntent(intent)
+        } else if (intent.getBooleanExtra(EXTRA_OPEN_HOME, false)) {
             binding.bottomNav.selectedItemId = R.id.nav_home
             (supportFragmentManager.findFragmentByTag(TAG_HOME) as? HomeFragment)?.refreshFromStorage(focusMap = true)
+        }
+    }
+
+    private fun handleWidgetLaunchIntent(launchIntent: android.content.Intent?) {
+        if (launchIntent?.getBooleanExtra(EXTRA_WIDGET_SAVE_SPOT, false) != true) return
+        launchIntent.removeExtra(EXTRA_WIDGET_SAVE_SPOT)
+        binding.bottomNav.selectedItemId = R.id.nav_home
+        binding.root.post {
+            (supportFragmentManager.findFragmentByTag(TAG_HOME) as? HomeFragment)?.triggerGpsSaveFromExternal()
         }
     }
 
@@ -157,28 +171,43 @@ class MainActivity : AppCompatActivity() {
             return
         }
         val enabled = parkingStorage.isShakeToSaveEnabled()
+        val backgroundEnabled = enabled && parkingStorage.isBackgroundShakeEnabled()
         shakeDetector.setSensitivity(parkingStorage.getShakeSensitivity())
+        shakeDetector.setCooldownMs(parkingStorage.getShakeCooldownMs())
+        shakeDetector.setLastTriggeredTimeMs(
+            parkingStorage.getLastShakeTriggerMs(),
+            System.currentTimeMillis()
+        )
         if (enabled && ShakeMonitorService.isMainForeground) {
             shakeDetector.start()
         } else {
             shakeDetector.stop()
         }
 
-        if (enabled && locationManager.hasLocationPermission() &&
+        if (backgroundEnabled && locationManager.hasLocationPermission() &&
             lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
         ) {
             ShakeMonitorService.start(this)
-        } else if (!enabled) {
+        } else {
             ShakeMonitorService.stop(this)
         }
     }
 
     private fun onShakeDetected() {
         if (isFinishing || isDestroyed) return
+        val now = System.currentTimeMillis()
+        if (parkingStorage.isWithinShakeCooldown(now)) {
+            shakeDetector.setLastTriggeredTimeMs(parkingStorage.getLastShakeTriggerMs(), now)
+            return
+        }
         if (selectedTabId != R.id.nav_home) {
             binding.bottomNav.selectedItemId = R.id.nav_home
         }
-        (supportFragmentManager.findFragmentByTag(TAG_HOME) as? HomeFragment)?.triggerSaveFromShake()
+        val triggered = (supportFragmentManager.findFragmentByTag(TAG_HOME) as? HomeFragment)
+            ?.triggerSaveFromShake() == true
+        if (triggered) {
+            parkingStorage.setLastShakeTriggerMs(now)
+        }
     }
 
     override fun onResume() {
