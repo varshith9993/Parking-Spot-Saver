@@ -26,7 +26,7 @@
             <data android:scheme="geo" />
         </intent>
         <intent>
-            <action android:name="android.intent.action.VIEW" />
+            <action android:name="android.intent.action.VIE W" />
             <data android:scheme="https" />
         </intent>
     </queries>
