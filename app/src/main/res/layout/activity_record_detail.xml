@@ -148,6 +148,54 @@
                         </LinearLayout>
                     </com.google.android.material.card.MaterialCardView>
 
+                    <com.google.android.material.card.MaterialCardView
+                        android:layout_width="40dp"
+                        android:layout_height="40dp"
+                        android:layout_gravity="end|top"
+                        android:layout_marginTop="98dp"
+                        android:layout_marginEnd="10dp"
+                        app:cardBackgroundColor="@color/ps_card_bg"
+                        app:cardCornerRadius="10dp"
+                        app:cardElevation="2dp"
+                        app:strokeColor="@color/ps_card_stroke"
+                        app:strokeWidth="1dp">
+
+                        <ImageButton
+                            android:id="@+id/btnDetailMyLocation"
+                            android:layout_width="match_parent"
+                            android:layout_height="match_parent"
+                            android:background="?attr/selectableItemBackgroundBorderless"
+                            android:contentDescription="@string/center_my_location"
+                            android:padding="9dp"
+                            android:scaleType="centerInside"
+                            android:src="@drawable/ic_my_location"
+                            app:tint="@color/ps_accent_blue" />
+                    </com.google.android.material.card.MaterialCardView>
+
+                    <com.google.android.material.card.MaterialCardView
+                        android:layout_width="40dp"
+                        android:layout_height="40dp"
+                        android:layout_gravity="end|top"
+                        android:layout_marginTop="146dp"
+                        android:layout_marginEnd="10dp"
+                        app:cardBackgroundColor="@color/ps_card_bg"
+                        app:cardCornerRadius="10dp"
+                        app:cardElevation="2dp"
+                        app:strokeColor="@color/ps_card_stroke"
+                        app:strokeWidth="1dp">
+
+                        <ImageButton
+                            android:id="@+id/btnDetailCenterSpot"
+                            android:layout_width="match_parent"
+                            android:layout_height="match_parent"
+                            android:background="?attr/selectableItemBackgroundBorderless"
+                            android:contentDescription="@string/saved_spot_badge"
+                            android:padding="9dp"
+                            android:scaleType="centerInside"
+                            android:src="@drawable/ic_pin_drop"
+                            app:tint="@color/ps_primary" />
+                    </com.google.android.material.card.MaterialCardView>
+
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"

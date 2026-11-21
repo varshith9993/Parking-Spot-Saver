@@ -320,7 +320,7 @@
             </LinearLayout>
         </LinearLayout>
 
-        <!-- Expanded Map Mode: Fills entire middle container with interactive x, +, -, o controls -->
+        <!-- Expanded Map Mode: Full middle map with top-left 'x', top-right '+'/'-'/'o', bottom-left Distance, bottom-right Zoom -->
         <FrameLayout
             android:id="@+id/widgetExpandedMapContainer"
             android:layout_width="match_parent"
@@ -354,75 +354,129 @@
                     android:tint="#1F1F1F" />
             </FrameLayout>
 
-            <!-- Bottom-left live map status chip -->
-            <TextView
-                android:id="@+id/tvWidgetMapStatus"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_gravity="bottom|start"
-                android:layout_margin="8dp"
-                android:background="@drawable/bg_widget_chip_light"
-                android:maxLines="1"
-                android:paddingBottom="4dp"
-                android:paddingEnd="9dp"
-                android:paddingStart="9dp"
-                android:paddingTop="4dp"
-                android:textColor="#1F1F1F"
-                android:textSize="10.5sp"
-                android:textStyle="bold" />
-
-            <!-- Right-side '+', '-', 'o' (Current Location) floating circular controls -->
+            <!-- Right-side vertical floating controls from top: '+', '−', 'o' (Current Location), 'Pin' (Parked Spot) -->
             <LinearLayout
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_gravity="center_vertical|end"
-                android:layout_margin="8dp"
+                android:layout_gravity="top|end"
+                android:layout_marginEnd="8dp"
+                android:layout_marginTop="8dp"
                 android:gravity="center_horizontal"
                 android:orientation="vertical">
 
                 <TextView
                     android:id="@+id/btnWidgetMapZoomIn"
-                    android:layout_width="30dp"
-                    android:layout_height="30dp"
+                    android:layout_width="28dp"
+                    android:layout_height="26dp"
                     android:background="@drawable/bg_widget_map_ctrl_light"
                     android:contentDescription="@string/widget_map_zoom_in_desc"
                     android:gravity="center"
                     android:text="+"
                     android:textColor="#1F1F1F"
-                    android:textSize="17sp"
+                    android:textSize="16sp"
                     android:textStyle="bold" />
 
                 <TextView
                     android:id="@+id/btnWidgetMapZoomOut"
-                    android:layout_width="30dp"
-                    android:layout_height="30dp"
-                    android:layout_marginTop="5dp"
+                    android:layout_width="28dp"
+                    android:layout_height="26dp"
+                    android:layout_marginTop="3dp"
                     android:background="@drawable/bg_widget_map_ctrl_light"
                     android:contentDescription="@string/widget_map_zoom_out_desc"
                     android:gravity="center"
                     android:text="−"
                     android:textColor="#1F1F1F"
-                    android:textSize="17sp"
+                    android:textSize="16sp"
                     android:textStyle="bold" />
 
                 <FrameLayout
                     android:id="@+id/btnWidgetMapMyLocation"
-                    android:layout_width="30dp"
-                    android:layout_height="30dp"
-                    android:layout_marginTop="5dp"
+                    android:layout_width="28dp"
+                    android:layout_height="26dp"
+                    android:layout_marginTop="3dp"
                     android:background="@drawable/bg_widget_map_ctrl_light"
                     android:contentDescription="@string/widget_map_my_location_desc">
 
                     <ImageView
                         android:id="@+id/ivWidgetMapMyLocationIcon"
-                        android:layout_width="16dp"
-                        android:layout_height="16dp"
+                        android:layout_width="15dp"
+                        android:layout_height="15dp"
                         android:layout_gravity="center"
                         android:contentDescription="@string/widget_map_my_location_desc"
                         android:src="@drawable/ic_my_location"
+                        android:tint="#1A73E8" />
+                </FrameLayout>
+
+                <FrameLayout
+                    android:id="@+id/btnWidgetMapPin"
+                    android:layout_width="28dp"
+                    android:layout_height="26dp"
+                    android:layout_marginTop="3dp"
+                    android:background="@drawable/bg_widget_map_ctrl_light"
+                    android:contentDescription="@string/widget_map_pin_desc">
+
+                    <ImageView
+                        android:id="@+id/ivWidgetMapPinIcon"
+                        android:layout_width="15dp"
+                        android:layout_height="15dp"
+                        android:layout_gravity="center"
+                        android:contentDescription="@string/widget_map_pin_desc"
+                        android:src="@drawable/ic_pin_drop"
                         android:tint="#146C2E" />
                 </FrameLayout>
             </LinearLayout>
+
+            <!-- Bottom-left Distance chip -->
+            <LinearLayout
+                android:id="@+id/btnWidgetMapDistance"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="bottom|start"
+                android:layout_margin="8dp"
+                android:background="@drawable/bg_widget_chip_light"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingBottom="4dp"
+                android:paddingEnd="9dp"
+                android:paddingStart="8dp"
+                android:paddingTop="4dp">
+
+                <ImageView
+                    android:id="@+id/ivWidgetMapDistanceIcon"
+                    android:layout_width="12dp"
+                    android:layout_height="12dp"
+                    android:contentDescription="@string/widget_show_distance"
+                    android:src="@drawable/ic_my_location"
+                    android:tint="#146C2E" />
+
+                <TextView
+                    android:id="@+id/tvWidgetMapDistance"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="5dp"
+                    android:maxLines="1"
+                    android:text="@string/widget_show_distance"
+                    android:textColor="#1F1F1F"
+                    android:textSize="10.5sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
+
+            <!-- Bottom-right Zoom badge -->
+            <TextView
+                android:id="@+id/tvWidgetMapZoom"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="bottom|end"
+                android:layout_margin="8dp"
+                android:background="@drawable/bg_widget_chip_light"
+                android:maxLines="1"
+                android:paddingBottom="4dp"
+                android:paddingEnd="8dp"
+                android:paddingStart="8dp"
+                android:paddingTop="4dp"
+                android:textColor="#1F1F1F"
+                android:textSize="10.5sp"
+                android:textStyle="bold" />
         </FrameLayout>
     </FrameLayout>
 

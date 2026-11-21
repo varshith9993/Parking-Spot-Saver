@@ -2,6 +2,7 @@ package com.example.devicewatch.location;
 
 import android.Manifest;
 import android.annotation.SuppressLint;
+import android.app.PendingIntent;
 import android.content.Context;
 import android.content.pm.PackageManager;
 import android.location.Location;
@@ -212,6 +213,29 @@ public class ParkingLocationManager {
         if (liveLocationCallback != null) {
             fusedClient.removeLocationUpdates(liveLocationCallback);
             liveLocationCallback = null;
+        }
+    }
+
+    public void startWidgetLocationBroadcastUpdates(@NonNull PendingIntent pendingIntent) {
+        if (!hasLocationPermission()) {
+            return;
+        }
+        try {
+            LocationRequest widgetRequest = new LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 4000L)
+                    .setMinUpdateIntervalMillis(2500L)
+                    .setMinUpdateDistanceMeters(6f)
+                    .setMaxUpdateDelayMillis(6000L)
+                    .setWaitForAccurateLocation(false)
+                    .build();
+            fusedClient.requestLocationUpdates(widgetRequest, pendingIntent);
+        } catch (SecurityException ignored) {
+        }
+    }
+
+    public void stopWidgetLocationBroadcastUpdates(@NonNull PendingIntent pendingIntent) {
+        try {
+            fusedClient.removeLocationUpdates(pendingIntent);
+        } catch (Exception ignored) {
         }
     }
 

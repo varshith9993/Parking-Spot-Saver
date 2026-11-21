@@ -1,13 +1,16 @@
 package com.example.devicewatch
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.location.Location
 import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.view.MotionEvent
 import android.view.View
 import android.widget.Toast
 import androidx.activity.enableEdgeToEdge
@@ -29,6 +32,8 @@ import com.example.devicewatch.storage.ParkingPhotoManager
 import com.example.devicewatch.storage.ParkingStorage
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import org.maplibre.android.MapLibre
+import org.maplibre.android.camera.CameraUpdateFactory
+import org.maplibre.android.geometry.LatLng
 import org.maplibre.android.maps.MapLibreMap
 import org.maplibre.android.maps.Style
 import java.text.DateFormat
@@ -55,7 +60,11 @@ class ParkingRecordDetailActivity : AppCompatActivity() {
     private var sourceMode: String = MODE_SAVED
     private var mapLibreMap: MapLibreMap? = null
     private var mapInitialized = false
+    private var isMapStyleLoaded = false
     private var isPhotoBusy = false
+    private var latestUserLocation: Location? = null
+    private var centerMapOnNextLocation = false
+    private var isLiveMapUpdatesActive = false
 
     private val relativeTimeHandler = Handler(Looper.getMainLooper())
     private val relativeTimeTickRunnable = object : Runnable {
@@ -77,6 +86,13 @@ class ParkingRecordDetailActivity : AppCompatActivity() {
             grants[Manifest.permission.ACCESS_COARSE_LOCATION] == true
         val allowRetry = shouldShowRequestPermissionRationale(Manifest.permission.ACCESS_FINE_LOCATION) ||
             shouldShowRequestPermissionRationale(Manifest.permission.ACCESS_COARSE_LOCATION)
+        if (granted) {
+            activateDetailLocationPuckIfReady()
+            startLiveMapLocationUpdates()
+            if (centerMapOnNextLocation) {
+                fetchAndCenterCurrentLocation()
+            }
+        }
         distanceController.onPermissionResult(granted, allowRetry)
     }
 
@@ -223,6 +239,13 @@ class ParkingRecordDetailActivity : AppCompatActivity() {
         binding.btnDetailBookmark.setOnClickListener { toggleBookmark() }
         binding.btnDetailZoomIn.setOnClickListener { ParkingUiHelper.zoomIn(mapLibreMap) }
         binding.btnDetailZoomOut.setOnClickListener { ParkingUiHelper.zoomOut(mapLibreMap) }
+        binding.btnDetailMyLocation.setOnClickListener { onDetailMyLocationClicked() }
+        binding.btnDetailCenterSpot.setOnClickListener {
+            val map = mapLibreMap ?: return@setOnClickListener
+            val active = currentRecord ?: return@setOnClickListener
+            centerMapOnNextLocation = false
+            ParkingUiHelper.showRecordOnMap(map, isMapStyleLoaded, active, animateCamera = true)
+        }
         binding.btnDetailNavigate.setOnClickListener {
             val active = currentRecord ?: return@setOnClickListener
             val opened = NavigationManager.openDirections(
@@ -594,12 +617,23 @@ class ParkingRecordDetailActivity : AppCompatActivity() {
         }
     }
 
+    @SuppressLint("ClickableViewAccessibility")
     private fun setupMapView(savedInstanceState: Bundle?, record: ParkingRecord) {
         if (!mapInitialized) {
             binding.tvDetailMapFallback.visibility = View.VISIBLE
             return
         }
         try {
+            // Allow smooth finger swipe/drag/pinch inside NestedScrollView without scroll hijacking
+            binding.detailMapView.setOnTouchListener { view, event ->
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE ->
+                        view.parent?.requestDisallowInterceptTouchEvent(true)
+                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL ->
+                        view.parent?.requestDisallowInterceptTouchEvent(false)
+                }
+                false
+            }
             binding.detailMapView.onCreate(savedInstanceState)
             binding.detailMapView.addOnDidFailLoadingMapListener {
                 runOnUiThread {
@@ -610,9 +644,17 @@ class ParkingRecordDetailActivity : AppCompatActivity() {
             }
             binding.detailMapView.getMapAsync { map ->
                 mapLibreMap = map
+                map.uiSettings.apply {
+                    isScrollGesturesEnabled = true
+                    isZoomGesturesEnabled = true
+                    isRotateGesturesEnabled = true
+                    isQuickZoomGesturesEnabled = true
+                }
                 map.setStyle(Style.Builder().fromUri(ParkingUiHelper.MAP_STYLE_URL)) { style ->
                     if (isFinishing || isDestroyed) return@setStyle
+                    isMapStyleLoaded = true
                     ParkingUiHelper.ensureMarkerLayer(this, style)
+                    activateDetailLocationPuckIfReady()
                     binding.tvDetailMapFallback.visibility = View.GONE
                     ParkingUiHelper.showRecordOnMap(map, true, record)
                 }
@@ -621,6 +663,95 @@ class ParkingRecordDetailActivity : AppCompatActivity() {
             mapInitialized = false
             binding.tvDetailMapFallback.visibility = View.VISIBLE
         }
+    }
+
+    private fun activateDetailLocationPuckIfReady() {
+        val map = mapLibreMap ?: return
+        val style = map.style ?: return
+        if (isMapStyleLoaded && style.isFullyLoaded && locationManager.hasLocationPermission()) {
+            ParkingUiHelper.activateUserLocationPuck(this, map, style, latestUserLocation)
+        }
+    }
+
+    private fun onDetailMyLocationClicked() {
+        if (!locationManager.hasLocationPermission()) {
+            centerMapOnNextLocation = true
+            locationPermissionLauncher.launch(
+                arrayOf(
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.ACCESS_COARSE_LOCATION
+                )
+            )
+            return
+        }
+        activateDetailLocationPuckIfReady()
+        startLiveMapLocationUpdates()
+        val cached = latestUserLocation ?: locationManager.getLastKnownLocationSync()
+        if (cached != null) {
+            latestUserLocation = cached
+            ParkingUiHelper.updateUserLocationPuck(mapLibreMap, cached)
+            animateCameraToLocation(cached)
+        } else {
+            centerMapOnNextLocation = true
+            fetchAndCenterCurrentLocation()
+        }
+    }
+
+    private fun fetchAndCenterCurrentLocation() {
+        locationManager.getFastLocation(object : ParkingLocationManager.LocationResultCallback {
+            override fun onLocationRetrieved(location: Location) {
+                if (isFinishing || isDestroyed) return
+                latestUserLocation = location
+                activateDetailLocationPuckIfReady()
+                ParkingUiHelper.updateUserLocationPuck(mapLibreMap, location)
+                if (centerMapOnNextLocation) {
+                    centerMapOnNextLocation = false
+                    animateCameraToLocation(location)
+                }
+            }
+
+            override fun onLocationError(message: String) {
+                if (isFinishing || isDestroyed) return
+                centerMapOnNextLocation = false
+                Toast.makeText(this@ParkingRecordDetailActivity, message, Toast.LENGTH_SHORT).show()
+            }
+        })
+    }
+
+    private fun animateCameraToLocation(location: Location) {
+        mapLibreMap?.animateCamera(
+            CameraUpdateFactory.newLatLngZoom(
+                LatLng(location.latitude, location.longitude),
+                ParkingUiHelper.MAP_DEFAULT_ZOOM
+            )
+        )
+    }
+
+    private fun startLiveMapLocationUpdates() {
+        if (!locationManager.hasLocationPermission() || isLiveMapUpdatesActive) return
+        isLiveMapUpdatesActive = true
+        locationManager.startLocationUpdates(object : ParkingLocationManager.LocationResultCallback {
+            override fun onLocationRetrieved(location: Location) {
+                if (isFinishing || isDestroyed) return
+                latestUserLocation = location
+                activateDetailLocationPuckIfReady()
+                ParkingUiHelper.updateUserLocationPuck(mapLibreMap, location)
+                if (centerMapOnNextLocation) {
+                    centerMapOnNextLocation = false
+                    animateCameraToLocation(location)
+                }
+            }
+
+            override fun onLocationError(message: String) {
+                // Keep quiet on passive updates; explicit taps surface errors directly.
+            }
+        })
+    }
+
+    private fun stopLiveMapLocationUpdates() {
+        if (!isLiveMapUpdatesActive) return
+        isLiveMapUpdatesActive = false
+        locationManager.stopLocationUpdates()
     }
 
     private fun toggleBookmark() {
@@ -754,6 +885,9 @@ class ParkingRecordDetailActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         if (mapInitialized) binding.detailMapView.onResume()
+        if (locationManager.hasLocationPermission()) {
+            startLiveMapLocationUpdates()
+        }
         currentRecord?.let {
             binding.tvDetailRelativeTime.text = RelativeTimeFormatter.format(it.savedTimestamp)
             if (distanceController.stateFor(it.id) is ParkingUiHelper.RecordDistanceState.Idle &&
@@ -768,11 +902,13 @@ class ParkingRecordDetailActivity : AppCompatActivity() {
     }
 
     override fun onPause() {
+        stopLiveMapLocationUpdates()
         if (mapInitialized) binding.detailMapView.onPause()
         super.onPause()
     }
 
     override fun onStop() {
+        stopLiveMapLocationUpdates()
         stopRelativeTimeTicker()
         distanceController.cancelAndClear(resetStates = true)
         if (mapInitialized) binding.detailMapView.onStop()

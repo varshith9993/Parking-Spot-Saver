@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.DashPathEffect
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
@@ -36,19 +37,20 @@ import kotlin.math.roundToInt
 import kotlin.math.tan
 
 /**
- * Renders real MapLibre OpenFreeMap Liberty snapshots matching the in-app map,
- * preserves previous real map bitmaps during transitions to eliminate dark/bright flashes,
- * and falls back cleanly to OSM tiles or Liberty-tinted street grids offline.
+ * High-speed MapLibre OpenFreeMap Liberty snapshot renderer with multi-entry LRU disk cache,
+ * dashed walking-path overlay between user GPS and parked vehicle, and zero-flash fallback.
  */
 object WidgetMapRenderer {
 
     private const val MINI_LOGICAL_DP = 132
-    private const val MINI_PIXEL_RATIO = 1.25f // 165x165 px (fast & crisp)
+    private const val MINI_PIXEL_RATIO = 1.25f // 165x165 px
     private const val EXPANDED_LOGICAL_W = 280
-    private const val EXPANDED_LOGICAL_H = 144
-    private const val EXPANDED_PIXEL_RATIO = 1.25f // 350x180 px (fast Binder transfer)
+    private const val EXPANDED_LOGICAL_H = 148
+    private const val EXPANDED_PIXEL_RATIO = 1.25f // 350x185 px
     private const val TILE_SIZE_PX = 256
     private const val CORNER_RADIUS_PX = 12f
+    private const val MAX_CACHED_MAP_FILES = 10
+    private const val CACHE_SUBDIR = "widget_maps"
     private const val CONNECT_TIMEOUT_MS = 3500
     private const val READ_TIMEOUT_MS = 4000
 
@@ -68,7 +70,7 @@ object WidgetMapRenderer {
         val isExpanded: Boolean,
         val isDark: Boolean
     ) {
-        val cacheName: String get() = if (isExpanded) "widget_map_full" else "widget_map_mini"
+        val cacheName: String get() = if (isExpanded) "full" else "mini"
         val cacheKey: String
             get() = String.format(
                 Locale.US,
@@ -80,38 +82,35 @@ object WidgetMapRenderer {
                 if (userLng.isNaN()) 999.0 else userLng,
                 zoom
             )
+        val fileName: String get() = "${cacheName}_${cacheKey.hashCode().toUInt().toString(16)}.png"
     }
 
     fun getCachedBitmap(context: Context, req: MapRenderRequest): Bitmap? {
-        val keyFile = File(context.cacheDir, "${req.cacheName}.key")
-        val imgFile = File(context.cacheDir, "${req.cacheName}.png")
-        if (!keyFile.exists() || !imgFile.exists()) return null
+        val dir = File(context.cacheDir, CACHE_SUBDIR)
+        val file = File(dir, req.fileName)
+        if (!file.exists()) return null
         return try {
-            if (keyFile.readText().trim() == req.cacheKey) {
-                BitmapFactory.decodeFile(imgFile.absolutePath)
-            } else {
-                null
-            }
+            file.setLastModified(System.currentTimeMillis())
+            BitmapFactory.decodeFile(file.absolutePath)
         } catch (_: Exception) {
             null
         }
     }
 
     /**
-     * Returns the most recent cached Liberty map for the given slot (`mini` or `full`) if its
-     * parked spot matches, avoiding dark/bright grid flashes during zoom or GPS recenter transitions.
+     * Returns the most recent cached Liberty map for the current parked spot (even at another zoom
+     * or user position) so UI transitions stay smooth without flashing a grid placeholder.
      */
     fun getPreviousSpotBitmapIfAvailable(context: Context, req: MapRenderRequest): Bitmap? {
-        val keyFile = File(context.cacheDir, "${req.cacheName}.key")
-        val imgFile = File(context.cacheDir, "${req.cacheName}.png")
-        if (!keyFile.exists() || !imgFile.exists()) return null
+        val dir = File(context.cacheDir, CACHE_SUBDIR)
+        val pointerKey = File(dir, "latest_${req.cacheName}.key")
+        val pointerImg = File(dir, "latest_${req.cacheName}.path")
+        if (!pointerKey.exists() || !pointerImg.exists()) return null
         return try {
             val parkedPrefix = String.format(Locale.US, "%s_%.5f_%.5f_", req.cacheName, req.parkedLat, req.parkedLng)
-            if (keyFile.readText().trim().startsWith(parkedPrefix)) {
-                BitmapFactory.decodeFile(imgFile.absolutePath)
-            } else {
-                null
-            }
+            if (!pointerKey.readText().trim().startsWith(parkedPrefix)) return null
+            val targetFile = File(pointerImg.readText().trim())
+            if (targetFile.exists()) BitmapFactory.decodeFile(targetFile.absolutePath) else null
         } catch (_: Exception) {
             null
         }
@@ -127,7 +126,7 @@ object WidgetMapRenderer {
         canvas.save()
         canvas.clipPath(clipPath)
 
-        // Always use daylight OpenFreeMap Liberty parchment palette so fallback matches live tiles cleanly
+        // OpenFreeMap Liberty daylight parchment base avoids dark/bright glitches
         canvas.drawColor(Color.parseColor("#EFECE6"))
 
         val minorRoad = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -159,10 +158,17 @@ object WidgetMapRenderer {
         canvas.drawLine(w * 0.56f, 0f, w * 0.46f, h.toFloat(), majorRoad)
 
         val parkedPt = projectLatLngApprox(req.parkedLat, req.parkedLng, req.centerLat, req.centerLng, req.zoom, w, h)
+        val hasUser = DistanceCalculator.isValidCoordinate(req.userLat, req.userLng)
+        val userPt = if (hasUser) {
+            projectLatLngApprox(req.userLat, req.userLng, req.centerLat, req.centerLng, req.zoom, w, h)
+        } else {
+            null
+        }
+        if (userPt != null) {
+            drawWalkingPathLine(canvas, userPt.first, userPt.second, parkedPt.first, parkedPt.second)
+        }
         drawParkedPin(context, canvas, parkedPt.first, parkedPt.second)
-
-        if (DistanceCalculator.isValidCoordinate(req.userLat, req.userLng)) {
-            val userPt = projectLatLngApprox(req.userLat, req.userLng, req.centerLat, req.centerLng, req.zoom, w, h)
+        if (userPt != null) {
             drawUserLocationPuck(canvas, userPt.first, userPt.second)
         }
 
@@ -282,10 +288,14 @@ object WidgetMapRenderer {
         canvas.drawBitmap(src, 0f, 0f, null)
 
         val parkedPt = snapshot.pixelForLatLng(LatLng(req.parkedLat, req.parkedLng))
-        drawParkedPin(context, canvas, parkedPt.x, parkedPt.y)
+        val hasUser = DistanceCalculator.isValidCoordinate(req.userLat, req.userLng)
+        val userPt = if (hasUser) snapshot.pixelForLatLng(LatLng(req.userLat, req.userLng)) else null
 
-        if (DistanceCalculator.isValidCoordinate(req.userLat, req.userLng)) {
-            val userPt = snapshot.pixelForLatLng(LatLng(req.userLat, req.userLng))
+        if (userPt != null) {
+            drawWalkingPathLine(canvas, userPt.x, userPt.y, parkedPt.x, parkedPt.y)
+        }
+        drawParkedPin(context, canvas, parkedPt.x, parkedPt.y)
+        if (userPt != null) {
             drawUserLocationPuck(canvas, userPt.x, userPt.y)
         }
 
@@ -294,15 +304,57 @@ object WidgetMapRenderer {
         return out
     }
 
+    private fun drawWalkingPathLine(
+        canvas: Canvas,
+        x1: Float,
+        y1: Float,
+        x2: Float,
+        y2: Float
+    ) {
+        val dx = x2 - x1
+        val dy = y2 - y1
+        if (dx * dx + dy * dy < 16f) return
+
+        val path = Path().apply {
+            moveTo(x1, y1)
+            lineTo(x2, y2)
+        }
+        val dash = DashPathEffect(floatArrayOf(12f, 8f), 0f)
+        val haloPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
+            alpha = 210
+            strokeWidth = 7f
+            strokeCap = Paint.Cap.ROUND
+            style = Paint.Style.STROKE
+            pathEffect = dash
+        }
+        val linePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.parseColor("#146C2E")
+            strokeWidth = 4f
+            strokeCap = Paint.Cap.ROUND
+            style = Paint.Style.STROKE
+            pathEffect = dash
+        }
+        canvas.drawPath(path, haloPaint)
+        canvas.drawPath(path, linePaint)
+    }
+
     private fun drawParkedPin(context: Context, canvas: Canvas, cx: Float, cy: Float) {
         val w = canvas.width
         val h = canvas.height
         if (cx < -32f || cx > w + 32f || cy < -32f || cy > h + 32f) return
 
+        val haloPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.parseColor("#146C2E")
+            alpha = 40
+            style = Paint.Style.FILL
+        }
+        canvas.drawCircle(cx, cy, 14f, haloPaint)
+
         val drawable = ResourcesCompat.getDrawable(context.resources, R.drawable.ic_parking_pin, context.theme)
         val pinBmp = drawable?.let { BitmapUtils.getBitmapFromDrawable(it) }
         if (pinBmp != null) {
-            val targetSize = (if (w > 240) 38f else 34f).roundToInt()
+            val targetSize = (if (w > 240) 40f else 34f).roundToInt()
             val scaled = Bitmap.createScaledBitmap(pinBmp, targetSize, targetSize, true)
             canvas.drawBitmap(scaled, cx - targetSize / 2f, cy - targetSize.toFloat(), null)
             scaled.recycle()
@@ -325,21 +377,28 @@ object WidgetMapRenderer {
         val blue = Color.parseColor("#1A73E8")
         val haloPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = blue
-            alpha = 46
+            alpha = 48
             style = Paint.Style.FILL
+        }
+        val haloRingPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = blue
+            alpha = 95
+            strokeWidth = 2f
+            style = Paint.Style.STROKE
         }
         val ringPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.WHITE
             style = Paint.Style.FILL
-            setShadowLayer(4f, 0f, 2f, Color.argb(80, 0, 0, 0))
+            setShadowLayer(4f, 0f, 2f, Color.argb(90, 0, 0, 0))
         }
         val corePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = blue
             style = Paint.Style.FILL
         }
         canvas.drawCircle(cx, cy, 22f, haloPaint)
-        canvas.drawCircle(cx, cy, 10.5f, ringPaint)
-        canvas.drawCircle(cx, cy, 7f, corePaint)
+        canvas.drawCircle(cx, cy, 22f, haloRingPaint)
+        canvas.drawCircle(cx, cy, 11f, ringPaint)
+        canvas.drawCircle(cx, cy, 7.5f, corePaint)
     }
 
     private fun renderOsmTilesBitmap(context: Context, req: MapRenderRequest): Bitmap? {
@@ -397,9 +456,14 @@ object WidgetMapRenderer {
         }
 
         val parkedPt = projectLatLngApprox(req.parkedLat, req.parkedLng, req.centerLat, req.centerLng, z.toDouble(), w, h)
+        val hasUser = DistanceCalculator.isValidCoordinate(req.userLat, req.userLng)
+        val userPt = if (hasUser) projectLatLngApprox(req.userLat, req.userLng, req.centerLat, req.centerLng, z.toDouble(), w, h) else null
+
+        if (userPt != null) {
+            drawWalkingPathLine(canvas, userPt.first, userPt.second, parkedPt.first, parkedPt.second)
+        }
         drawParkedPin(context, canvas, parkedPt.first, parkedPt.second)
-        if (DistanceCalculator.isValidCoordinate(req.userLat, req.userLng)) {
-            val userPt = projectLatLngApprox(req.userLat, req.userLng, req.centerLat, req.centerLng, z.toDouble(), w, h)
+        if (userPt != null) {
             drawUserLocationPuck(canvas, userPt.first, userPt.second)
         }
 
@@ -451,14 +515,25 @@ object WidgetMapRenderer {
 
     private fun writeBitmapToCache(appCtx: Context, req: MapRenderRequest, bitmap: Bitmap) {
         try {
-            val temp = File(appCtx.cacheDir, "${req.cacheName}.tmp")
+            val dir = File(appCtx.cacheDir, CACHE_SUBDIR).apply { if (!exists()) mkdirs() }
+            val dest = File(dir, req.fileName)
+            val temp = File(dir, "${req.fileName}.tmp")
             FileOutputStream(temp).use { out ->
                 bitmap.compress(Bitmap.CompressFormat.PNG, 92, out)
             }
-            val dest = File(appCtx.cacheDir, "${req.cacheName}.png")
             if (dest.exists()) dest.delete()
             temp.renameTo(dest)
-            File(appCtx.cacheDir, "${req.cacheName}.key").writeText(req.cacheKey)
+
+            File(dir, "latest_${req.cacheName}.key").writeText(req.cacheKey)
+            File(dir, "latest_${req.cacheName}.path").writeText(dest.absolutePath)
+
+            // Trim old LRU PNG cache entries beyond MAX_CACHED_MAP_FILES
+            val cachedPngs = dir.listFiles { f -> f.isFile && f.name.endsWith(".png") }
+            if (cachedPngs != null && cachedPngs.size > MAX_CACHED_MAP_FILES) {
+                cachedPngs.sortedBy { it.lastModified() }
+                    .take(cachedPngs.size - MAX_CACHED_MAP_FILES)
+                    .forEach { it.delete() }
+            }
         } catch (_: Exception) {
         }
     }

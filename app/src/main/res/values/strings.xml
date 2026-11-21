@@ -320,6 +320,9 @@
     <string name="widget_map_zoom_in_desc">Zoom in map</string>
     <string name="widget_map_zoom_out_desc">Zoom out map</string>
     <string name="widget_map_my_location_desc">Center on current location</string>
+    <string name="widget_map_pin_desc">Center on parked pin</string>
+    <string name="widget_map_zoom_badge">Zoom %.0f</string>
+    <string name="widget_map_locating">Locating…</string>
     <string name="widget_map_status_spot">Pinned spot · Zoom %.0f</string>
     <string name="widget_map_status_user">Current GPS · Zoom %.0f</string>
     <string name="widget_map_updating">Updating map…</string>
