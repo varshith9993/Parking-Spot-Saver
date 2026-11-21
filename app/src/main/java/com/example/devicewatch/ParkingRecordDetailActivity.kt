@@ -14,7 +14,6 @@ import android.view.MotionEvent
 import android.view.View
 import android.widget.Toast
 import androidx.activity.enableEdgeToEdge
-import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
@@ -28,7 +27,6 @@ import com.example.devicewatch.location.ParkingLocationManager
 import com.example.devicewatch.model.ParkingPhotoItem
 import com.example.devicewatch.model.ParkingRecord
 import com.example.devicewatch.model.RelativeTimeFormatter
-import com.example.devicewatch.navigation.NavigationManager
 import com.example.devicewatch.navigation.RouteFetcher
 import com.example.devicewatch.storage.ParkingPhotoManager
 import com.example.devicewatch.storage.ParkingStorage
@@ -71,6 +69,8 @@ class ParkingRecordDetailActivity : AppCompatActivity() {
     private var centerMapOnNextLocation = false
     private var isLiveMapUpdatesActive = false
     private val routeFetcher = RouteFetcher()
+    private val dateFormatter = DateFormat.getDateInstance(DateFormat.MEDIUM)
+    private val timeFormatter = DateFormat.getTimeInstance(DateFormat.SHORT)
     private var hasAutoFittedInitialRoute = false
     private var hasUserInteractedWithMap = false
 
@@ -128,13 +128,8 @@ class ParkingRecordDetailActivity : AppCompatActivity() {
         if (isFinishing || isDestroyed) return@registerForActivityResult
         if (result.resultCode != RESULT_OK || result.data == null) return@registerForActivityResult
 
-        val data = result.data ?: return@registerForActivityResult
-        val photoPath = data.getStringExtra(CameraCaptureActivity.EXTRA_PHOTO_PATH) ?: return@registerForActivityResult
-        val capturedAt = data.getLongExtra(CameraCaptureActivity.EXTRA_CAPTURED_AT, 0L)
-        val photoLat = data.getDoubleExtra(CameraCaptureActivity.EXTRA_PHOTO_LAT, Double.NaN)
-        val photoLng = data.getDoubleExtra(CameraCaptureActivity.EXTRA_PHOTO_LNG, Double.NaN)
-
-        val item = ParkingPhotoItem(photoPath, capturedAt, photoLat, photoLng, 0L)
+        val item = ParkingUiHelper.extractCapturedPhotoItem(result.data)
+            ?: return@registerForActivityResult
         attachPhotoToCurrentRecord(item, showAddedToast = true)
     }
 
@@ -190,12 +185,7 @@ class ParkingRecordDetailActivity : AppCompatActivity() {
             locationManager = locationManager,
             isActive = { !isFinishing && !isDestroyed },
             onRequestLocationPermission = {
-                locationPermissionLauncher.launch(
-                    arrayOf(
-                        Manifest.permission.ACCESS_FINE_LOCATION,
-                        Manifest.permission.ACCESS_COARSE_LOCATION
-                    )
-                )
+                locationPermissionLauncher.launch(ParkingUiHelper.LOCATION_PERMISSIONS)
             },
             onLaunchGpsResolution = { request -> gpsResolutionLauncher.launch(request) },
             onShowPermissionDialog = { allowRetry ->
@@ -266,14 +256,11 @@ class ParkingRecordDetailActivity : AppCompatActivity() {
         }
         binding.btnDetailNavigate.setOnClickListener {
             val active = currentRecord ?: return@setOnClickListener
-            val opened = NavigationManager.openDirections(
+            ParkingUiHelper.openDirectionsWithFeedback(
                 this,
-                active.toParkingSpot(),
+                active,
                 parkingStorage.getNavigationTravelMode()
             )
-            if (!opened) {
-                Toast.makeText(this, R.string.no_navigation_app, Toast.LENGTH_SHORT).show()
-            }
         }
         binding.btnDetailShare.setOnClickListener { shareCurrentRecord() }
         binding.btnDetailDelete.setOnClickListener { confirmDeleteOrUnsave() }
@@ -368,8 +355,8 @@ class ParkingRecordDetailActivity : AppCompatActivity() {
         binding.tvDetailRelativeTime.text = RelativeTimeFormatter.format(record.savedTimestamp)
         if (record.savedTimestamp > 0L) {
             val date = Date(record.savedTimestamp)
-            binding.tvDetailDate.text = DateFormat.getDateInstance(DateFormat.MEDIUM).format(date)
-            binding.tvDetailTime.text = DateFormat.getTimeInstance(DateFormat.SHORT).format(date)
+            binding.tvDetailDate.text = dateFormatter.format(date)
+            binding.tvDetailTime.text = timeFormatter.format(date)
         } else {
             binding.tvDetailDate.text = "--"
             binding.tvDetailTime.text = "--"
@@ -500,22 +487,19 @@ class ParkingRecordDetailActivity : AppCompatActivity() {
             Toast.makeText(this, R.string.photo_limit_reached, Toast.LENGTH_SHORT).show()
             return
         }
-        try {
-            val request = PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-            if (remainingSlots == 1) {
-                pickSingleMediaLauncher.launch(request)
-            } else {
-                pickMultipleMediaLauncher.launch(request)
-            }
-        } catch (_: Exception) {
-            try {
-                fallbackGalleryLauncher.launch(
-                    ParkingUiHelper.buildFallbackGalleryIntent(allowMultiple = remainingSlots > 1)
-                )
-            } catch (_: Exception) {
-                Toast.makeText(this, R.string.photo_picker_unavailable, Toast.LENGTH_SHORT).show()
-            }
-        }
+        val allowMultiple = remainingSlots > 1
+        ParkingUiHelper.launchPhotoPicker(
+            context = this,
+            allowMultiple = allowMultiple,
+            launchPrimary = { request ->
+                if (allowMultiple) {
+                    pickMultipleMediaLauncher.launch(request)
+                } else {
+                    pickSingleMediaLauncher.launch(request)
+                }
+            },
+            launchFallback = { fallbackGalleryLauncher.launch(it) }
+        )
     }
 
     private fun importSelectedGalleryUris(uris: List<Uri>) {
@@ -667,6 +651,8 @@ class ParkingRecordDetailActivity : AppCompatActivity() {
                     isZoomGesturesEnabled = true
                     isRotateGesturesEnabled = true
                     isQuickZoomGesturesEnabled = true
+                    isLogoEnabled = false
+                    isAttributionEnabled = false
                 }
                 map.addOnCameraMoveStartedListener { reason ->
                     if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) {
@@ -703,12 +689,7 @@ class ParkingRecordDetailActivity : AppCompatActivity() {
     private fun onDetailMyLocationClicked() {
         if (!locationManager.hasLocationPermission()) {
             centerMapOnNextLocation = true
-            locationPermissionLauncher.launch(
-                arrayOf(
-                    Manifest.permission.ACCESS_FINE_LOCATION,
-                    Manifest.permission.ACCESS_COARSE_LOCATION
-                )
-            )
+            locationPermissionLauncher.launch(ParkingUiHelper.LOCATION_PERMISSIONS)
             return
         }
         activateDetailLocationPuckIfReady()
@@ -880,14 +861,7 @@ class ParkingRecordDetailActivity : AppCompatActivity() {
 
     private fun shareCurrentRecord() {
         val active = currentRecord ?: return
-        val shared = NavigationManager.shareParkingRecord(
-            this,
-            active,
-            getString(R.string.share_chooser_title)
-        )
-        if (!shared) {
-            Toast.makeText(this, R.string.share_unavailable, Toast.LENGTH_SHORT).show()
-        }
+        ParkingUiHelper.shareRecordWithFeedback(this, active)
     }
 
     private fun confirmDeleteOrUnsave() {
@@ -944,7 +918,6 @@ class ParkingRecordDetailActivity : AppCompatActivity() {
     override fun onStart() {
         super.onStart()
         if (mapInitialized) binding.detailMapView.onStart()
-        startRelativeTimeTicker()
     }
 
     override fun onResume() {
@@ -994,11 +967,14 @@ class ParkingRecordDetailActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        stopLiveMapLocationUpdates()
         stopRelativeTimeTicker()
+        relativeTimeHandler.removeCallbacksAndMessages(null)
         routeFetcher.shutdown()
         distanceController.cancelAndClear(resetStates = false)
         photoManager.shutdown()
         if (mapInitialized) binding.detailMapView.onDestroy()
+        mapLibreMap = null
         super.onDestroy()
     }
 }

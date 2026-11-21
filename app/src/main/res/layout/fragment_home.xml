@@ -408,22 +408,23 @@
         </com.google.android.material.card.MaterialCardView>
     </LinearLayout>
 
-    <!-- Map Attribution Pill Anchored Above Bottom Sheet -->
+    <!-- Map Attribution Pill Anchored Subtlety at Bottom-Right Above Sheet -->
     <TextView
         android:id="@+id/tvMapAttribution"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginStart="12dp"
-        android:layout_marginBottom="8dp"
-        android:background="@color/ps_card_bg"
-        android:paddingHorizontal="8dp"
-        android:paddingVertical="3dp"
+        android:layout_marginEnd="8dp"
+        android:layout_marginBottom="4dp"
+        android:alpha="0.45"
+        android:background="@android:color/transparent"
+        android:paddingHorizontal="2dp"
+        android:paddingVertical="1dp"
         android:text="@string/map_attribution"
         android:textAppearance="@style/TextAppearance.Material3.LabelSmall"
         android:textColor="@color/ps_text_secondary"
-        android:textSize="10sp"
+        android:textSize="8.5sp"
         app:layout_anchor="@id/homeBottomSheet"
-        app:layout_anchorGravity="top|start" />
+        app:layout_anchorGravity="top|end" />
 
     <!-- Google Maps-style Draggable Bottom Sheet -->
     <LinearLayout

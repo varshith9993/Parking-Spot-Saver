@@ -18,6 +18,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.fragment.app.Fragment
+import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.example.devicewatch.databinding.FragmentSavedBinding
@@ -25,7 +26,6 @@ import com.example.devicewatch.location.NativeGeocoder
 import com.example.devicewatch.location.ParkingLocationManager
 import com.example.devicewatch.model.ParkingRecord
 import com.example.devicewatch.model.RelativeTimeFormatter
-import com.example.devicewatch.navigation.NavigationManager
 import com.example.devicewatch.storage.ParkingPhotoManager
 import com.example.devicewatch.storage.ParkingStorage
 import com.google.android.material.button.MaterialButton
@@ -53,7 +53,7 @@ class SavedLocationsFragment : Fragment() {
     private val relativeTimeTickRunnable = object : Runnable {
         override fun run() {
             if (_binding != null && isAdded && !isHidden && ::adapter.isInitialized) {
-                adapter.notifyDataSetChanged()
+                adapter.notifyTimeTick()
                 relativeTimeHandler.postDelayed(this, RELATIVE_TIME_REFRESH_MS)
             }
         }
@@ -97,12 +97,7 @@ class SavedLocationsFragment : Fragment() {
             locationManager = locationManager,
             isActive = { isAdded && _binding != null && !isHidden },
             onRequestLocationPermission = {
-                locationPermissionLauncher.launch(
-                    arrayOf(
-                        Manifest.permission.ACCESS_FINE_LOCATION,
-                        Manifest.permission.ACCESS_COARSE_LOCATION
-                    )
-                )
+                locationPermissionLauncher.launch(ParkingUiHelper.LOCATION_PERMISSIONS)
             },
             onLaunchGpsResolution = { request -> gpsResolutionLauncher.launch(request) },
             onShowPermissionDialog = { allowRetry ->
@@ -124,7 +119,7 @@ class SavedLocationsFragment : Fragment() {
             },
             onStatesChanged = {
                 if (isAdded && _binding != null && ::adapter.isInitialized) {
-                    adapter.notifyDataSetChanged()
+                    adapter.notifyDistancesChanged()
                 }
             }
         )
@@ -181,25 +176,15 @@ class SavedLocationsFragment : Fragment() {
     }
 
     private fun navigateTo(record: ParkingRecord) {
-        val opened = NavigationManager.openDirections(
+        ParkingUiHelper.openDirectionsWithFeedback(
             requireContext(),
-            record.toParkingSpot(),
+            record,
             parkingStorage.getNavigationTravelMode()
         )
-        if (!opened) {
-            Toast.makeText(requireContext(), R.string.no_navigation_app, Toast.LENGTH_SHORT).show()
-        }
     }
 
     private fun shareRecord(record: ParkingRecord) {
-        val shared = NavigationManager.shareParkingRecord(
-            requireContext(),
-            record,
-            getString(R.string.share_chooser_title)
-        )
-        if (!shared) {
-            Toast.makeText(requireContext(), R.string.share_unavailable, Toast.LENGTH_SHORT).show()
-        }
+        ParkingUiHelper.shareRecordWithFeedback(requireContext(), record)
     }
 
     private fun editNote(record: ParkingRecord) {
@@ -245,13 +230,6 @@ class SavedLocationsFragment : Fragment() {
         }
     }
 
-    override fun onStart() {
-        super.onStart()
-        if (!isHidden) {
-            startRelativeTimeTicker()
-        }
-    }
-
     override fun onResume() {
         super.onResume()
         if (!isHidden) {
@@ -270,6 +248,7 @@ class SavedLocationsFragment : Fragment() {
 
     override fun onDestroyView() {
         stopRelativeTimeTicker()
+        relativeTimeHandler.removeCallbacksAndMessages(null)
         if (::distanceController.isInitialized) {
             distanceController.cancelAndClear(resetStates = false)
         }
@@ -293,6 +272,8 @@ class SavedLocationsFragment : Fragment() {
 
         companion object {
             private const val THUMB_SIZE = 180
+            private const val PAYLOAD_TIME = "payload_time"
+            private const val PAYLOAD_DISTANCE = "payload_distance"
         }
 
         private val items = mutableListOf<ParkingRecord>()
@@ -300,9 +281,47 @@ class SavedLocationsFragment : Fragment() {
             DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT)
 
         fun submit(records: List<ParkingRecord>) {
+            val oldItems = items.toList()
+            val newItems = records.toList()
+            val diff = DiffUtil.calculateDiff(object : DiffUtil.Callback() {
+                override fun getOldListSize(): Int = oldItems.size
+
+                override fun getNewListSize(): Int = newItems.size
+
+                override fun areItemsTheSame(oldItemPosition: Int, newItemPosition: Int): Boolean {
+                    return oldItems[oldItemPosition].id == newItems[newItemPosition].id
+                }
+
+                override fun areContentsTheSame(oldItemPosition: Int, newItemPosition: Int): Boolean {
+                    val a = oldItems[oldItemPosition]
+                    val b = newItems[newItemPosition]
+                    return a.id == b.id &&
+                        a.placeLabel == b.placeLabel &&
+                        a.address == b.address &&
+                        a.latitude == b.latitude &&
+                        a.longitude == b.longitude &&
+                        a.savedTimestamp == b.savedTimestamp &&
+                        a.note == b.note &&
+                        a.photoPath == b.photoPath &&
+                        a.photoCount == b.photoCount &&
+                        a.isSaved == b.isSaved
+                }
+            })
             items.clear()
-            items.addAll(records)
-            notifyDataSetChanged()
+            items.addAll(newItems)
+            diff.dispatchUpdatesTo(this)
+        }
+
+        fun notifyTimeTick() {
+            if (items.isNotEmpty()) {
+                notifyItemRangeChanged(0, items.size, PAYLOAD_TIME)
+            }
+        }
+
+        fun notifyDistancesChanged() {
+            if (items.isNotEmpty()) {
+                notifyItemRangeChanged(0, items.size, PAYLOAD_DISTANCE)
+            }
         }
 
         override fun getItemCount(): Int = items.size
@@ -315,6 +334,30 @@ class SavedLocationsFragment : Fragment() {
 
         override fun onBindViewHolder(holder: SavedViewHolder, position: Int) {
             holder.bind(items[position])
+        }
+
+        override fun onBindViewHolder(
+            holder: SavedViewHolder,
+            position: Int,
+            payloads: MutableList<Any>
+        ) {
+            if (payloads.isEmpty()) {
+                onBindViewHolder(holder, position)
+                return
+            }
+            val record = items[position]
+            var handled = false
+            if (payloads.contains(PAYLOAD_TIME)) {
+                holder.bindRelativeTime(record)
+                handled = true
+            }
+            if (payloads.contains(PAYLOAD_DISTANCE)) {
+                holder.bindDistance(record)
+                handled = true
+            }
+            if (!handled) {
+                holder.bind(record)
+            }
         }
 
         private inner class SavedViewHolder(view: View) : RecyclerView.ViewHolder(view) {
@@ -336,6 +379,20 @@ class SavedLocationsFragment : Fragment() {
             private val btnShare: MaterialButton = view.findViewById(R.id.btnSavedShare)
             private val btnNote: MaterialButton = view.findViewById(R.id.btnSavedEditNote)
 
+            fun bindRelativeTime(record: ParkingRecord) {
+                tvRelativeTime.text = RelativeTimeFormatter.format(record.savedTimestamp)
+            }
+
+            fun bindDistance(record: ParkingRecord) {
+                ParkingUiHelper.bindOnDemandDistanceRow(
+                    distanceStateProvider(record.id),
+                    pbDistance,
+                    tvDistance,
+                    btnDistance
+                )
+                btnDistance.setOnClickListener { onDistanceClick(record) }
+            }
+
             fun bind(record: ParkingRecord) {
                 val label = record.placeLabel
                 if (!label.isNullOrBlank()) {
@@ -352,7 +409,7 @@ class SavedLocationsFragment : Fragment() {
                     itemView.context.getString(R.string.address_unavailable_fallback)
                 }
                 tvCoords.text = NativeGeocoder.formatCoordinates(record.latitude, record.longitude)
-                tvRelativeTime.text = RelativeTimeFormatter.format(record.savedTimestamp)
+                bindRelativeTime(record)
                 tvDateTime.text = if (record.savedTimestamp > 0L) {
                     dateTimeFormatter.format(Date(record.savedTimestamp))
                 } else {
@@ -369,41 +426,16 @@ class SavedLocationsFragment : Fragment() {
                     btnNote.setText(R.string.add_note)
                 }
 
-                ParkingUiHelper.bindOnDemandDistanceRow(
-                    distanceStateProvider(record.id),
-                    pbDistance,
-                    tvDistance,
-                    btnDistance
-                )
-                btnDistance.setOnClickListener { onDistanceClick(record) }
-
+                bindDistance(record)
                 ParkingUiHelper.applyBookmarkIcon(btnBookmark, true)
-
-                val photoPath = record.photoPath
-                if (record.photoCount > 1) {
-                    tvPhotoBadge.text = itemView.context.getString(
-                        R.string.photo_count_badge_format,
-                        record.photoCount
-                    )
-                    tvPhotoBadge.visibility = View.VISIBLE
-                } else {
-                    tvPhotoBadge.visibility = View.GONE
-                }
-                if (photoPath.isNullOrBlank()) {
-                    ivThumb.tag = null
-                    ivThumb.setImageDrawable(null)
-                    cardThumb.visibility = View.GONE
-                } else if (ivThumb.tag != photoPath || ivThumb.drawable == null) {
-                    ivThumb.tag = photoPath
-                    ivThumb.setImageDrawable(null)
-                    cardThumb.visibility = View.GONE
-                    photoManager.loadSampledBitmap(photoPath, THUMB_SIZE, THUMB_SIZE) { bitmap ->
-                        if (bitmap != null && ivThumb.tag == photoPath) {
-                            ivThumb.setImageBitmap(bitmap)
-                            cardThumb.visibility = View.VISIBLE
-                        }
-                    }
-                }
+                ParkingUiHelper.bindRecordThumbnail(
+                    photoManager,
+                    record,
+                    cardThumb,
+                    ivThumb,
+                    tvPhotoBadge,
+                    THUMB_SIZE
+                )
 
                 itemView.setOnClickListener { onView(record) }
                 btnView.setOnClickListener { onView(record) }

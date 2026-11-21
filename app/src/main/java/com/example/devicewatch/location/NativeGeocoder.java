@@ -31,6 +31,7 @@ public class NativeGeocoder {
     private final Context appContext;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
+    private volatile boolean isShutDown = false;
 
     public NativeGeocoder(@NonNull Context context) {
         this.appContext = context.getApplicationContext();
@@ -41,6 +42,9 @@ public class NativeGeocoder {
             double longitude,
             @NonNull GeocodeCallback callback
     ) {
+        if (isShutDown) {
+            return;
+        }
         String fallback = formatCoordinates(latitude, longitude);
         if (!DistanceCalculator.isValidCoordinate(latitude, longitude)) {
             postFailure(callback, fallback, "Invalid coordinates.");
@@ -56,6 +60,9 @@ public class NativeGeocoder {
             geocoder.getFromLocation(latitude, longitude, 1, new Geocoder.GeocodeListener() {
                 @Override
                 public void onGeocode(@NonNull List<Address> addresses) {
+                    if (isShutDown) {
+                        return;
+                    }
                     String formatted = extractBestAddress(addresses);
                     if (formatted != null) {
                         postSuccess(callback, formatted);
@@ -66,6 +73,9 @@ public class NativeGeocoder {
 
                 @Override
                 public void onError(@Nullable String errorMessage) {
+                    if (isShutDown) {
+                        return;
+                    }
                     String reason = errorMessage != null && !errorMessage.isEmpty()
                             ? errorMessage
                             : "Reverse geocoding failed.";
@@ -78,6 +88,9 @@ public class NativeGeocoder {
                 return;
             }
             executor.execute(() -> {
+                if (isShutDown) {
+                    return;
+                }
                 try {
                     @SuppressWarnings("deprecation")
                     List<Address> addresses = geocoder.getFromLocation(latitude, longitude, 1);
@@ -98,6 +111,8 @@ public class NativeGeocoder {
     }
 
     public void shutdown() {
+        isShutDown = true;
+        mainHandler.removeCallbacksAndMessages(null);
         executor.shutdown();
     }
 

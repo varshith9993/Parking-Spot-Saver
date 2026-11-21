@@ -189,8 +189,8 @@ class CameraCaptureActivity : AppCompatActivity() {
 
     private fun bindCameraUseCases() {
         val provider = cameraProvider ?: return
-        val hasBack = hasCameraSafely(provider, CameraSelector.DEFAULT_BACK_CAMERA)
-        val hasFront = hasCameraSafely(provider, CameraSelector.DEFAULT_FRONT_CAMERA)
+        val hasBack = ParkingUiHelper.hasCameraSafely(provider, CameraSelector.DEFAULT_BACK_CAMERA)
+        val hasFront = ParkingUiHelper.hasCameraSafely(provider, CameraSelector.DEFAULT_FRONT_CAMERA)
 
         if (lensFacing == CameraSelector.LENS_FACING_FRONT && !hasFront && hasBack) {
             lensFacing = CameraSelector.LENS_FACING_BACK
@@ -228,17 +228,6 @@ class CameraCaptureActivity : AppCompatActivity() {
         }
     }
 
-    private fun hasCameraSafely(
-        provider: ProcessCameraProvider,
-        selector: CameraSelector
-    ): Boolean {
-        return try {
-            provider.hasCamera(selector)
-        } catch (_: Exception) {
-            false
-        }
-    }
-
     private fun switchCameraLens() {
         val provider = cameraProvider ?: return
         val targetFacing = if (lensFacing == CameraSelector.LENS_FACING_BACK) {
@@ -247,7 +236,7 @@ class CameraCaptureActivity : AppCompatActivity() {
             CameraSelector.LENS_FACING_BACK
         }
         val targetSelector = CameraSelector.Builder().requireLensFacing(targetFacing).build()
-        if (!hasCameraSafely(provider, targetSelector)) {
+        if (!ParkingUiHelper.hasCameraSafely(provider, targetSelector)) {
             Toast.makeText(this, R.string.camera_switch_unavailable, Toast.LENGTH_SHORT).show()
             return
         }
@@ -408,6 +397,10 @@ class CameraCaptureActivity : AppCompatActivity() {
         if (!captureCompleted) {
             deletePendingFileQuietly()
         }
+        cameraProvider?.unbindAll()
+        boundCamera = null
+        imageCapture = null
+        cameraProvider = null
         locationManager.cancelCurrentLocationRequest()
         photoManager.shutdown()
         cameraExecutor.shutdown()

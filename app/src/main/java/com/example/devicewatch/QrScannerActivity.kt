@@ -10,7 +10,6 @@ import android.os.Bundle
 import android.view.View
 import android.widget.Toast
 import androidx.activity.enableEdgeToEdge
-import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.camera.core.Camera
@@ -57,6 +56,8 @@ class QrScannerActivity : AppCompatActivity() {
     private var torchEnabled = false
     private var initialTorchApplied = false
     private val hasDeliveredResult = AtomicBoolean(false)
+    private var reusableYBytes: ByteArray? = null
+    private var reusableRowBuffer: ByteArray? = null
 
     private val qrReader: MultiFormatReader by lazy {
         MultiFormatReader().apply {
@@ -156,8 +157,8 @@ class QrScannerActivity : AppCompatActivity() {
 
     private fun bindUseCases(provider: ProcessCameraProvider) {
         val selector = when {
-            hasCameraSafely(provider, CameraSelector.DEFAULT_BACK_CAMERA) -> CameraSelector.DEFAULT_BACK_CAMERA
-            hasCameraSafely(provider, CameraSelector.DEFAULT_FRONT_CAMERA) -> CameraSelector.DEFAULT_FRONT_CAMERA
+            ParkingUiHelper.hasCameraSafely(provider, CameraSelector.DEFAULT_BACK_CAMERA) -> CameraSelector.DEFAULT_BACK_CAMERA
+            ParkingUiHelper.hasCameraSafely(provider, CameraSelector.DEFAULT_FRONT_CAMERA) -> CameraSelector.DEFAULT_FRONT_CAMERA
             else -> {
                 showGalleryOnlyFallbackUi()
                 return
@@ -194,19 +195,12 @@ class QrScannerActivity : AppCompatActivity() {
     }
 
     private fun openGalleryQrPicker() {
-        try {
-            pickGalleryQrLauncher.launch(
-                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-            )
-        } catch (_: Exception) {
-            try {
-                fallbackGalleryQrLauncher.launch(
-                    ParkingUiHelper.buildFallbackGalleryIntent(allowMultiple = false)
-                )
-            } catch (_: Exception) {
-                Toast.makeText(this, R.string.photo_picker_unavailable, Toast.LENGTH_SHORT).show()
-            }
-        }
+        ParkingUiHelper.launchPhotoPicker(
+            context = this,
+            allowMultiple = false,
+            launchPrimary = { pickGalleryQrLauncher.launch(it) },
+            launchFallback = { fallbackGalleryQrLauncher.launch(it) }
+        )
     }
 
     private fun decodeQrFromUriAsync(uri: Uri) {
@@ -335,12 +329,15 @@ class QrScannerActivity : AppCompatActivity() {
         height: Int
     ): ByteArray {
         val dup = buffer.duplicate().apply { rewind() }
-        val yBytes = ByteArray(width * height)
-        if (rowStride == width && dup.remaining() >= yBytes.size) {
-            dup.get(yBytes)
+        val neededSize = width * height
+        val yBytes = reusableYBytes?.takeIf { it.size == neededSize }
+            ?: ByteArray(neededSize).also { reusableYBytes = it }
+        if (rowStride == width && dup.remaining() >= neededSize) {
+            dup.get(yBytes, 0, neededSize)
             return yBytes
         }
-        val rowBuffer = ByteArray(rowStride)
+        val rowBuffer = reusableRowBuffer?.takeIf { it.size >= rowStride }
+            ?: ByteArray(rowStride).also { reusableRowBuffer = it }
         for (row in 0 until height) {
             val remaining = dup.remaining()
             if (remaining <= 0) break
@@ -365,19 +362,11 @@ class QrScannerActivity : AppCompatActivity() {
         )
     }
 
-    private fun hasCameraSafely(
-        provider: ProcessCameraProvider,
-        selector: CameraSelector
-    ): Boolean {
-        return try {
-            provider.hasCamera(selector)
-        } catch (_: Exception) {
-            false
-        }
-    }
-
     override fun onDestroy() {
-        analysisExecutor.shutdown()
+        cameraProvider?.unbindAll()
+        boundCamera = null
+        cameraProvider = null
+        analysisExecutor.shutdownNow()
         super.onDestroy()
     }
 }

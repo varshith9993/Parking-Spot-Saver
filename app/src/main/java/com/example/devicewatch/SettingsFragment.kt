@@ -1,11 +1,8 @@
 package com.example.devicewatch
 
 import android.Manifest
-import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.Uri
 import android.os.Bundle
-import android.provider.Settings
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -84,9 +81,11 @@ class SettingsFragment : Fragment() {
     }
 
     private fun setupListeners() {
-        binding.btnPermAppSettings.setOnClickListener { openAppSettings() }
+        binding.btnPermAppSettings.setOnClickListener {
+            ParkingUiHelper.openAppPermissionSettings(requireContext())
+        }
         binding.btnOpenDeviceLocationSettings.setOnClickListener {
-            startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
+            ParkingUiHelper.openDeviceLocationSettings(requireContext())
         }
 
         binding.toggleThemeMode.addOnButtonCheckedListener { _, checkedId, isChecked ->
@@ -110,7 +109,24 @@ class SettingsFragment : Fragment() {
             } else {
                 NavigationManager.TRAVEL_WALKING
             }
-            parkingStorage.setNavigationTravelMode(nextMode)
+            if (parkingStorage.getNavigationTravelMode() != nextMode) {
+                parkingStorage.setNavigationTravelMode(nextMode)
+                com.example.devicewatch.widget.ParkingSpotWidgetProvider.onWidgetRoutePreferenceChanged(requireContext())
+            }
+        }
+
+        binding.toggleWidgetRouteMode.addOnButtonCheckedListener { _, checkedId, isChecked ->
+            if (isUpdatingControls || !isChecked) return@addOnButtonCheckedListener
+            val nextMode = if (checkedId == R.id.btnWidgetRouteGreen) {
+                ParkingStorage.WIDGET_ROUTE_MODE_GREEN_DOTTED
+            } else {
+                ParkingStorage.WIDGET_ROUTE_MODE_BLUE_AUTO
+            }
+            updateWidgetRouteDescription(nextMode)
+            if (parkingStorage.getWidgetRouteMode() != nextMode) {
+                parkingStorage.setWidgetRouteMode(nextMode)
+                com.example.devicewatch.widget.ParkingSpotWidgetProvider.onWidgetRoutePreferenceChanged(requireContext())
+            }
         }
 
         binding.switchSettingsShake.setOnCheckedChangeListener { _, isChecked ->
@@ -176,12 +192,7 @@ class SettingsFragment : Fragment() {
             askedInSession = askedLocationInSession,
             permission = Manifest.permission.ACCESS_FINE_LOCATION,
             onRequest = {
-                locationPermissionLauncher.launch(
-                    arrayOf(
-                        Manifest.permission.ACCESS_FINE_LOCATION,
-                        Manifest.permission.ACCESS_COARSE_LOCATION
-                    )
-                )
+                locationPermissionLauncher.launch(ParkingUiHelper.LOCATION_PERMISSIONS)
             }
         )
 
@@ -192,12 +203,7 @@ class SettingsFragment : Fragment() {
             askedInSession = askedLocationInSession,
             permission = Manifest.permission.ACCESS_COARSE_LOCATION,
             onRequest = {
-                locationPermissionLauncher.launch(
-                    arrayOf(
-                        Manifest.permission.ACCESS_FINE_LOCATION,
-                        Manifest.permission.ACCESS_COARSE_LOCATION
-                    )
-                )
+                locationPermissionLauncher.launch(ParkingUiHelper.LOCATION_PERMISSIONS)
             }
         )
 
@@ -225,7 +231,7 @@ class SettingsFragment : Fragment() {
             statusView.setBackgroundColor(ContextCompat.getColor(ctx, R.color.ps_granted_bg))
             statusView.setTextColor(ContextCompat.getColor(ctx, R.color.ps_granted_text))
             actionButton.setText(R.string.action_app_settings)
-            actionButton.setOnClickListener { openAppSettings() }
+            actionButton.setOnClickListener { ParkingUiHelper.openAppPermissionSettings(requireContext()) }
         } else {
             statusView.setText(R.string.status_not_granted)
             statusView.setBackgroundColor(ContextCompat.getColor(ctx, R.color.ps_denied_bg))
@@ -234,7 +240,7 @@ class SettingsFragment : Fragment() {
             val permanentlyDenied = askedInSession && !shouldShowRequestPermissionRationale(permission)
             if (permanentlyDenied) {
                 actionButton.setText(R.string.action_app_settings)
-                actionButton.setOnClickListener { openAppSettings() }
+                actionButton.setOnClickListener { ParkingUiHelper.openAppPermissionSettings(requireContext()) }
             } else {
                 actionButton.setText(R.string.action_request)
                 actionButton.setOnClickListener { onRequest() }
@@ -259,8 +265,16 @@ class SettingsFragment : Fragment() {
             }
             binding.toggleNavMode.check(navButtonId)
 
-            val detector = ShakeDetector(requireContext()) {}
-            if (!detector.isAccelerometerAvailable()) {
+            val widgetRouteMode = parkingStorage.getWidgetRouteMode()
+            val widgetRouteButtonId = if (widgetRouteMode == ParkingStorage.WIDGET_ROUTE_MODE_GREEN_DOTTED) {
+                R.id.btnWidgetRouteGreen
+            } else {
+                R.id.btnWidgetRouteBlue
+            }
+            binding.toggleWidgetRouteMode.check(widgetRouteButtonId)
+            updateWidgetRouteDescription(widgetRouteMode)
+
+            if (!ShakeDetector.isSensorAvailable(requireContext())) {
                 binding.switchSettingsShake.isChecked = false
                 binding.switchSettingsShake.isEnabled = false
                 binding.layoutSettingsShakeSensitivity.visibility = View.GONE
@@ -289,6 +303,16 @@ class SettingsFragment : Fragment() {
         } finally {
             isUpdatingControls = false
         }
+    }
+
+    private fun updateWidgetRouteDescription(mode: String) {
+        binding.tvSettingsWidgetRouteDesc.setText(
+            if (mode == ParkingStorage.WIDGET_ROUTE_MODE_GREEN_DOTTED) {
+                R.string.widget_route_desc_green
+            } else {
+                R.string.widget_route_desc_blue
+            }
+        )
     }
 
     private fun showCooldownPickerDialog() {
@@ -369,15 +393,6 @@ class SettingsFragment : Fragment() {
                 Toast.makeText(requireContext(), R.string.all_data_deleted, Toast.LENGTH_SHORT).show()
             }
             .show()
-    }
-
-    private fun openAppSettings() {
-        startActivity(
-            Intent(
-                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                Uri.fromParts("package", requireContext().packageName, null)
-            )
-        )
     }
 
     private fun isGranted(permission: String): Boolean {

@@ -38,11 +38,6 @@ public class ParkingHistoryEntry {
     }
 
     @NonNull
-    public static ParkingHistoryEntry fromSpot(@NonNull ParkingSpot spot) {
-        return new ParkingHistoryEntry(UUID.randomUUID().toString(), spot);
-    }
-
-    @NonNull
     public String getId() {
         return id;
     }
@@ -50,31 +45,6 @@ public class ParkingHistoryEntry {
     @NonNull
     public ParkingSpot getSpot() {
         return spot;
-    }
-
-    @NonNull
-    public JSONObject toJson() throws JSONException {
-        JSONObject obj = new JSONObject();
-        obj.put(KEY_ID, id);
-        obj.put(KEY_LAT, spot.getLatitude());
-        obj.put(KEY_LNG, spot.getLongitude());
-        obj.put(KEY_TIMESTAMP, spot.getTimestampMillis());
-        if (spot.getAddress() != null) {
-            obj.put(KEY_ADDRESS, spot.getAddress());
-        }
-        if (spot.getNote() != null) {
-            obj.put(KEY_NOTE, spot.getNote());
-        }
-        if (spot.getPhotoUri() != null) {
-            obj.put(KEY_PHOTO_URI, spot.getPhotoUri());
-        }
-        obj.put(KEY_PHOTO_CAPTURED_AT, spot.getPhotoCapturedAtMillis());
-        obj.put(KEY_PHOTO_IMPORTED_AT, spot.getPhotoImportedAtMillis());
-        if (spot.hasPhotoLocation()) {
-            obj.put(KEY_PHOTO_LAT, spot.getPhotoLatitude());
-            obj.put(KEY_PHOTO_LNG, spot.getPhotoLongitude());
-        }
-        return obj;
     }
 
     @Nullable

@@ -72,22 +72,37 @@ public final class HistoryDateGrouper {
             @NonNull String yesterdayLabel,
             @NonNull String earlierLabel
     ) {
+        Calendar cal = Calendar.getInstance();
+        cal.setTimeInMillis(referenceNowMillis);
+        int todayYear = cal.get(Calendar.YEAR);
+        int todayDay = cal.get(Calendar.DAY_OF_YEAR);
+        cal.add(Calendar.DAY_OF_YEAR, -1);
+        int yesterdayYear = cal.get(Calendar.YEAR);
+        int yesterdayDay = cal.get(Calendar.DAY_OF_YEAR);
+
         List<ParkingRecord> todayList = new ArrayList<>();
         List<ParkingRecord> yesterdayList = new ArrayList<>();
         List<ParkingRecord> earlierList = new ArrayList<>();
 
         for (ParkingRecord record : records) {
-            int category = classifyTimestamp(record.getSavedTimestamp(), referenceNowMillis);
-            if (category == CATEGORY_TODAY) {
+            long ts = record.getSavedTimestamp();
+            if (ts <= 0L) {
+                earlierList.add(record);
+                continue;
+            }
+            cal.setTimeInMillis(ts);
+            int year = cal.get(Calendar.YEAR);
+            int day = cal.get(Calendar.DAY_OF_YEAR);
+            if (year == todayYear && day == todayDay) {
                 todayList.add(record);
-            } else if (category == CATEGORY_YESTERDAY) {
+            } else if (year == yesterdayYear && day == yesterdayDay) {
                 yesterdayList.add(record);
             } else {
                 earlierList.add(record);
             }
         }
 
-        List<ListRow> rows = new ArrayList<>();
+        List<ListRow> rows = new ArrayList<>(records.size() + 3);
         appendSection(rows, todayLabel, todayList);
         appendSection(rows, yesterdayLabel, yesterdayList);
         appendSection(rows, earlierLabel, earlierList);

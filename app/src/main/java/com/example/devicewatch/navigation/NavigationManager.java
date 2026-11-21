@@ -31,13 +31,6 @@ public final class NavigationManager {
     private NavigationManager() {
     }
 
-    public static boolean openWalkingDirections(
-            @NonNull Context context,
-            @Nullable ParkingSpot spot
-    ) {
-        return openDirections(context, spot, TRAVEL_WALKING);
-    }
-
     public static boolean openDirections(
             @NonNull Context context,
             @Nullable ParkingSpot spot,
@@ -47,14 +40,6 @@ public final class NavigationManager {
             return false;
         }
         return openDirections(context, spot.getLatitude(), spot.getLongitude(), travelMode);
-    }
-
-    public static boolean openWalkingDirections(
-            @NonNull Context context,
-            double latitude,
-            double longitude
-    ) {
-        return openDirections(context, latitude, longitude, TRAVEL_WALKING);
     }
 
     public static boolean openDirections(

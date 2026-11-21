@@ -9,7 +9,6 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
 import androidx.activity.enableEdgeToEdge
-import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
@@ -67,13 +66,8 @@ class PhotoViewerActivity : AppCompatActivity() {
         if (isFinishing || isDestroyed) return@registerForActivityResult
         if (result.resultCode != RESULT_OK || result.data == null) return@registerForActivityResult
 
-        val data = result.data ?: return@registerForActivityResult
-        val photoPath = data.getStringExtra(CameraCaptureActivity.EXTRA_PHOTO_PATH) ?: return@registerForActivityResult
-        val capturedAt = data.getLongExtra(CameraCaptureActivity.EXTRA_CAPTURED_AT, 0L)
-        val photoLat = data.getDoubleExtra(CameraCaptureActivity.EXTRA_PHOTO_LAT, Double.NaN)
-        val photoLng = data.getDoubleExtra(CameraCaptureActivity.EXTRA_PHOTO_LNG, Double.NaN)
-
-        val newItem = ParkingPhotoItem(photoPath, capturedAt, photoLat, photoLng, 0L)
+        val newItem = ParkingUiHelper.extractCapturedPhotoItem(result.data)
+            ?: return@registerForActivityResult
         applyReplacementPhoto(newItem)
     }
 
@@ -245,19 +239,12 @@ class PhotoViewerActivity : AppCompatActivity() {
                 }
             },
             onChooseGallery = {
-                try {
-                    pickReplaceMediaLauncher.launch(
-                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                    )
-                } catch (_: Exception) {
-                    try {
-                        fallbackReplaceGalleryLauncher.launch(
-                            ParkingUiHelper.buildFallbackGalleryIntent(allowMultiple = false)
-                        )
-                    } catch (_: Exception) {
-                        Toast.makeText(this, R.string.photo_picker_unavailable, Toast.LENGTH_SHORT).show()
-                    }
-                }
+                ParkingUiHelper.launchPhotoPicker(
+                    context = this,
+                    allowMultiple = false,
+                    launchPrimary = { pickReplaceMediaLauncher.launch(it) },
+                    launchFallback = { fallbackReplaceGalleryLauncher.launch(it) }
+                )
             }
         )
     }

@@ -25,12 +25,15 @@ import com.example.devicewatch.location.ParkingLocationManager
 import com.example.devicewatch.model.ParkingRecord
 import com.example.devicewatch.model.RelativeTimeFormatter
 import com.example.devicewatch.navigation.NavigationManager
+import com.example.devicewatch.navigation.RouteFetcher
 import com.example.devicewatch.storage.ParkingStorage
 import com.google.android.gms.location.LocationResult
 import java.text.DateFormat
 import java.util.Date
 import java.util.UUID
+import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.math.max
 
 /**
  * Interactive Home Screen AppWidget supporting top-left navigation to app,
@@ -77,52 +80,23 @@ class ParkingSpotWidgetProvider : AppWidgetProvider() {
                 stopWidgetLocationTracking(appCtx)
                 handleClearSpotInBackground(appCtx)
             }
-            ACTION_OPEN_WIDGET_MAP -> handleOpenOrZoomMap(appCtx, storage, openExpanded = true, zoomDelta = 0.0)
+            ACTION_OPEN_WIDGET_MAP -> handleOpenOrZoomMap(appCtx, storage, resetToSpot = true, zoomDelta = 0.0)
             ACTION_CLOSE_WIDGET_MAP -> {
                 stopWidgetLocationTracking(appCtx)
                 storage.setWidgetMapExpanded(false)
             }
-            ACTION_WIDGET_MAP_ZOOM_IN -> handleOpenOrZoomMap(appCtx, storage, openExpanded = false, zoomDelta = 1.0)
-            ACTION_WIDGET_MAP_ZOOM_OUT -> handleOpenOrZoomMap(appCtx, storage, openExpanded = false, zoomDelta = -1.0)
+            ACTION_WIDGET_MAP_ZOOM_IN -> handleOpenOrZoomMap(appCtx, storage, resetToSpot = false, zoomDelta = 1.0)
+            ACTION_WIDGET_MAP_ZOOM_OUT -> handleOpenOrZoomMap(appCtx, storage, resetToSpot = false, zoomDelta = -1.0)
             ACTION_WIDGET_MAP_MY_LOCATION -> handleShowDistanceInBackground(appCtx, centerExpandedMapOnUser = true)
-            ACTION_WIDGET_MAP_CENTER_PIN -> handleOpenOrZoomMap(appCtx, storage, openExpanded = true, zoomDelta = 0.0)
+            ACTION_WIDGET_MAP_CENTER_PIN -> handleOpenOrZoomMap(appCtx, storage, resetToSpot = true, zoomDelta = 0.0)
             ACTION_WIDGET_LOCATION_UPDATE -> handlePassiveWidgetMovementUpdate(appCtx, storage, intent)
         }
     }
 
-    private fun handleOpenOrZoomMap(
+    private fun renderOrShowCachedExpandedMap(
         appCtx: Context,
-        storage: ParkingStorage,
-        openExpanded: Boolean,
-        zoomDelta: Double
+        req: WidgetMapRenderer.MapRenderRequest
     ) {
-        val record = storage.getActiveRecord() ?: return
-        if (openExpanded) {
-            storage.resetWidgetMapCenterToSpot()
-            storage.setWidgetMapExpandedQuiet(true)
-            startWidgetLocationTracking(appCtx)
-        }
-        if (zoomDelta != 0.0) {
-            storage.setWidgetMapZoomQuiet(storage.getWidgetMapZoom() + zoomDelta)
-        }
-
-        val isDark = isDarkModeActive(appCtx, storage)
-        val userLat = storage.getWidgetMapUserLat()
-        val userLng = storage.getWidgetMapUserLng()
-        val hasUser = DistanceCalculator.isValidCoordinate(userLat, userLng)
-        val centerOnUser = storage.isWidgetMapCenteredOnUser() && hasUser
-        val req = WidgetMapRenderer.MapRenderRequest(
-            parkedLat = record.latitude,
-            parkedLng = record.longitude,
-            centerLat = if (centerOnUser) userLat else record.latitude,
-            centerLng = if (centerOnUser) userLng else record.longitude,
-            userLat = if (hasUser) userLat else Double.NaN,
-            userLng = if (hasUser) userLng else Double.NaN,
-            zoom = storage.getWidgetMapZoom(),
-            isExpanded = true,
-            isDark = isDark
-        )
-
         val isCached = WidgetMapRenderer.getCachedBitmap(appCtx, req) != null
         updateAllWidgets(appCtx, isSaving = false, isMeasuringDistance = !isCached)
         if (isCached) return
@@ -142,9 +116,53 @@ class ParkingSpotWidgetProvider : AppWidgetProvider() {
         }, ASYNC_GUARD_TIMEOUT_MS)
 
         WidgetMapRenderer.renderMapAsync(appCtx, req) {
+            val freshStorage = ParkingStorage(appCtx)
+            val freshRecord = freshStorage.getActiveRecord()
+            if (freshRecord != null && DistanceCalculator.isValidCoordinate(req.userLat, req.userLng)) {
+                syncWidgetDistanceFromMemory(appCtx, freshStorage, freshRecord, req.userLat, req.userLng)
+            }
             updateAllWidgets(appCtx, isSaving = false, isMeasuringDistance = false)
             completeAsync()
         }
+    }
+
+    private fun handleOpenOrZoomMap(
+        appCtx: Context,
+        storage: ParkingStorage,
+        resetToSpot: Boolean,
+        zoomDelta: Double
+    ) {
+        val record = storage.getActiveRecord() ?: return
+        if (resetToSpot) {
+            storage.resetWidgetMapCenterToSpot()
+            storage.setWidgetMapExpandedQuiet(true)
+            startWidgetLocationTracking(appCtx)
+        }
+        if (zoomDelta != 0.0) {
+            storage.setWidgetMapZoomQuiet(storage.getWidgetMapZoom() + zoomDelta)
+        }
+
+        val userPair = seedUserLocationQuietlyIfMissing(appCtx, storage, record)
+        val hasUser = userPair != null
+        val userLat = userPair?.first ?: Double.NaN
+        val userLng = userPair?.second ?: Double.NaN
+        if (hasUser) {
+            syncWidgetDistanceFromMemory(appCtx, storage, record, userLat, userLng)
+        }
+        val (centerLat, centerLng) = resolveMapCenter(storage, record, userLat, userLng, hasUser)
+
+        val req = buildMapRenderRequest(
+            storage = storage,
+            record = record,
+            centerLat = centerLat,
+            centerLng = centerLng,
+            userLat = userLat,
+            userLng = userLng,
+            zoom = storage.getWidgetMapZoom(),
+            isExpanded = true,
+            isDark = isDarkModeActive(appCtx, storage)
+        )
+        renderOrShowCachedExpandedMap(appCtx, req)
     }
 
     private fun handlePassiveWidgetMovementUpdate(
@@ -170,48 +188,43 @@ class ParkingSpotWidgetProvider : AppWidgetProvider() {
             if (movedMeters < 5.0f) return
         }
 
-        val meters = DistanceCalculator.calculateDistanceMeters(location, record.toParkingSpot())
-        val formatted = if (meters >= 0f) {
-            appCtx.getString(R.string.widget_distance_away_format, DistanceCalculator.formatDistance(meters))
-        } else {
-            null
-        }
+        val (formatted, isRoadRoute) = computeWidgetDistanceDisplay(
+            appCtx = appCtx,
+            storage = storage,
+            record = record,
+            userLat = location.latitude,
+            userLng = location.longitude
+        )
         val keepCenteredOnUser = storage.isWidgetMapCenteredOnUser()
         storage.saveWidgetDistanceAndUserLocationQuiet(
             record.id,
             formatted,
+            isRoadRoute,
             location.latitude,
             location.longitude,
             keepCenteredOnUser
         )
 
-        val req = WidgetMapRenderer.MapRenderRequest(
-            parkedLat = record.latitude,
-            parkedLng = record.longitude,
-            centerLat = if (keepCenteredOnUser) location.latitude else record.latitude,
-            centerLng = if (keepCenteredOnUser) location.longitude else record.longitude,
+        val (centerLat, centerLng) = resolveMapCenter(
+            storage,
+            record,
+            location.latitude,
+            location.longitude,
+            hasUser = true
+        )
+
+        val req = buildMapRenderRequest(
+            storage = storage,
+            record = record,
+            centerLat = centerLat,
+            centerLng = centerLng,
             userLat = location.latitude,
             userLng = location.longitude,
             zoom = storage.getWidgetMapZoom(),
             isExpanded = true,
             isDark = isDarkModeActive(appCtx, storage)
         )
-
-        if (WidgetMapRenderer.getCachedBitmap(appCtx, req) != null) {
-            updateAllWidgets(appCtx, isSaving = false, isMeasuringDistance = false)
-            return
-        }
-
-        val pendingResult = goAsync()
-        val done = AtomicBoolean(false)
-        fun completeAsync() {
-            if (done.compareAndSet(false, true)) pendingResult.finish()
-        }
-        Handler(Looper.getMainLooper()).postDelayed({ completeAsync() }, ASYNC_GUARD_TIMEOUT_MS)
-        WidgetMapRenderer.renderMapAsync(appCtx, req) {
-            updateAllWidgets(appCtx, isSaving = false, isMeasuringDistance = false)
-            completeAsync()
-        }
+        renderOrShowCachedExpandedMap(appCtx, req)
     }
 
     private fun handleSaveSpotInBackground(appCtx: Context) {
@@ -360,62 +373,114 @@ class ParkingSpotWidgetProvider : AppWidgetProvider() {
         centerExpandedMapOnUser: Boolean,
         onCompleteAsync: (() -> Unit)?
     ) {
-        val meters = DistanceCalculator.calculateDistanceMeters(location, active.toParkingSpot())
-        val formatted = if (meters >= 0f) {
-            appCtx.getString(R.string.widget_distance_away_format, DistanceCalculator.formatDistance(meters))
+        val (provisionalText, provisionalIsRoute) = computeWidgetDistanceDisplay(
+            appCtx = appCtx,
+            storage = storage,
+            record = active,
+            userLat = location.latitude,
+            userLng = location.longitude
+        )
+        val nextCenterOnUser = if (centerExpandedMapOnUser) {
+            true
         } else {
-            null
+            storage.isWidgetMapCenteredOnUser()
         }
-        val nextCenterOnUser = if (centerExpandedMapOnUser) true else storage.isWidgetMapCenteredOnUser()
 
         storage.saveWidgetDistanceAndUserLocationQuiet(
             active.id,
-            formatted,
+            provisionalText,
+            provisionalIsRoute,
             location.latitude,
             location.longitude,
             nextCenterOnUser
         )
 
-        if (!centerExpandedMapOnUser && !storage.isWidgetMapExpanded()) {
-            updateAllWidgets(appCtx, isSaving = false, isMeasuringDistance = false)
-            onCompleteAsync?.invoke()
-            return
+        val isExpandedOrCentering = centerExpandedMapOnUser || storage.isWidgetMapExpanded()
+        val (centerLat, centerLng) = if (isExpandedOrCentering) {
+            resolveMapCenter(
+                storage,
+                active,
+                location.latitude,
+                location.longitude,
+                hasUser = true
+            )
+        } else {
+            active.latitude to active.longitude
         }
 
-        val mapReq = WidgetMapRenderer.MapRenderRequest(
-            parkedLat = active.latitude,
-            parkedLng = active.longitude,
-            centerLat = if (nextCenterOnUser) location.latitude else active.latitude,
-            centerLng = if (nextCenterOnUser) location.longitude else active.longitude,
+        val mapReq = buildMapRenderRequest(
+            storage = storage,
+            record = active,
+            centerLat = centerLat,
+            centerLng = centerLng,
             userLat = location.latitude,
             userLng = location.longitude,
-            zoom = storage.getWidgetMapZoom(),
-            isExpanded = true,
+            zoom = if (isExpandedOrCentering) storage.getWidgetMapZoom() else 16.0,
+            isExpanded = isExpandedOrCentering,
             isDark = isDarkModeActive(appCtx, storage)
         )
 
-        val cached = WidgetMapRenderer.getCachedBitmap(appCtx, mapReq) != null
-        updateAllWidgets(appCtx, isSaving = false, isMeasuringDistance = !cached)
-        if (cached) {
+        val mapCached = WidgetMapRenderer.getCachedBitmap(appCtx, mapReq) != null
+        val needsRouteLookup = mapReq.usesRoadRoute && !provisionalIsRoute
+        val needsAsyncWork = !mapCached || needsRouteLookup
+
+        updateAllWidgets(appCtx, isSaving = false, isMeasuringDistance = needsAsyncWork)
+        if (!needsAsyncWork) {
             onCompleteAsync?.invoke()
             return
         }
 
+        fun finishAndRefresh() {
+            val freshStorage = ParkingStorage(appCtx)
+            val freshRecord = freshStorage.getActiveRecord()
+            if (freshRecord != null) {
+                syncWidgetDistanceFromMemory(
+                    appCtx,
+                    freshStorage,
+                    freshRecord,
+                    location.latitude,
+                    location.longitude
+                )
+            }
+            updateAllWidgets(appCtx, isSaving = false, isMeasuringDistance = false)
+            onCompleteAsync?.invoke()
+        }
+
+        var finishWithGuard: () -> Unit = ::finishAndRefresh
         if (onCompleteAsync == null) {
             val pendingResult = goAsync()
             val done = AtomicBoolean(false)
             fun finishOnce() {
                 if (done.compareAndSet(false, true)) pendingResult.finish()
             }
-            Handler(Looper.getMainLooper()).postDelayed({ finishOnce() }, ASYNC_GUARD_TIMEOUT_MS)
-            WidgetMapRenderer.renderMapAsync(appCtx, mapReq) {
-                updateAllWidgets(appCtx, isSaving = false, isMeasuringDistance = false)
+            Handler(Looper.getMainLooper()).postDelayed({
+                if (!done.get()) {
+                    updateAllWidgets(appCtx, isSaving = false, isMeasuringDistance = false)
+                    finishOnce()
+                }
+            }, ASYNC_GUARD_TIMEOUT_MS)
+            finishWithGuard = {
+                finishAndRefresh()
                 finishOnce()
             }
-        } else {
+        }
+
+        if (!mapCached) {
             WidgetMapRenderer.renderMapAsync(appCtx, mapReq) {
-                updateAllWidgets(appCtx, isSaving = false, isMeasuringDistance = false)
-                onCompleteAsync()
+                finishWithGuard()
+            }
+        } else {
+            routeExecutor.execute {
+                RouteFetcher.fetchRouteBlocking(
+                    originLat = location.latitude,
+                    originLng = location.longitude,
+                    destLat = active.latitude,
+                    destLng = active.longitude,
+                    travelMode = mapReq.travelMode,
+                    connectTimeoutMs = PREF_SYNC_CONNECT_TIMEOUT_MS,
+                    readTimeoutMs = PREF_SYNC_READ_TIMEOUT_MS
+                )
+                finishWithGuard()
             }
         }
     }
@@ -458,14 +523,175 @@ class ParkingSpotWidgetProvider : AppWidgetProvider() {
         private const val ACTION_WIDGET_LOCATION_UPDATE = "com.example.devicewatch.widget.ACTION_WIDGET_LOCATION_UPDATE"
 
         private const val ASYNC_GUARD_TIMEOUT_MS = 7_500L
+        private const val PREF_SYNC_CONNECT_TIMEOUT_MS = 2_500
+        private const val PREF_SYNC_READ_TIMEOUT_MS = 3_000
         private const val TINY_HEIGHT_DP = 100
         private const val LARGE_HEIGHT_DP = 175
         private const val MIN_WIDTH_FOR_MAP_DP = 200
         private const val LOCATION_UPDATE_REQUEST_CODE = 9901
 
+        private val routeExecutor = Executors.newSingleThreadExecutor()
+
         @JvmStatic
         fun updateAllWidgets(context: Context) {
             updateAllWidgets(context, isSaving = false, isMeasuringDistance = false)
+        }
+
+        @JvmStatic
+        fun onWidgetRoutePreferenceChanged(context: Context) {
+            val appCtx = context.applicationContext
+            val storage = ParkingStorage(appCtx)
+            val record = storage.getActiveRecord()
+            if (record == null) {
+                updateAllWidgets(appCtx)
+                return
+            }
+
+            val userPair = seedUserLocationQuietlyIfMissing(appCtx, storage, record)
+            if (userPair == null) {
+                updateAllWidgets(appCtx)
+                return
+            }
+
+            val (userLat, userLng) = userPair
+            syncWidgetDistanceFromMemory(appCtx, storage, record, userLat, userLng)
+
+            val isExpanded = storage.isWidgetMapExpanded()
+            val (centerLat, centerLng) = if (isExpanded) {
+                resolveMapCenter(storage, record, userLat, userLng, hasUser = true)
+            } else {
+                record.latitude to record.longitude
+            }
+            val mapReq = buildMapRenderRequest(
+                storage = storage,
+                record = record,
+                centerLat = centerLat,
+                centerLng = centerLng,
+                userLat = userLat,
+                userLng = userLng,
+                zoom = if (isExpanded) storage.getWidgetMapZoom() else 16.0,
+                isExpanded = isExpanded,
+                isDark = isDarkModeActive(appCtx, storage)
+            )
+            updateAllWidgets(appCtx)
+
+            val needsRouteLookup = mapReq.usesRoadRoute &&
+                RouteFetcher.getCachedRoadRouteSync(
+                    userLat,
+                    userLng,
+                    record.latitude,
+                    record.longitude,
+                    mapReq.travelMode
+                ) == null
+            if (!needsRouteLookup) return
+
+            routeExecutor.execute {
+                RouteFetcher.fetchRouteBlocking(
+                    originLat = userLat,
+                    originLng = userLng,
+                    destLat = record.latitude,
+                    destLng = record.longitude,
+                    travelMode = mapReq.travelMode,
+                    connectTimeoutMs = PREF_SYNC_CONNECT_TIMEOUT_MS,
+                    readTimeoutMs = PREF_SYNC_READ_TIMEOUT_MS
+                )
+                val freshStorage = ParkingStorage(appCtx)
+                val freshRecord = freshStorage.getActiveRecord() ?: return@execute
+                syncWidgetDistanceFromMemory(appCtx, freshStorage, freshRecord, userLat, userLng)
+                if (WidgetMapRenderer.getCachedBitmap(appCtx, mapReq) == null) {
+                    WidgetMapRenderer.renderMapAsync(appCtx, mapReq) {
+                        updateAllWidgets(appCtx)
+                    }
+                } else {
+                    updateAllWidgets(appCtx)
+                }
+            }
+        }
+
+        private fun buildMapRenderRequest(
+            storage: ParkingStorage,
+            record: ParkingRecord,
+            centerLat: Double,
+            centerLng: Double,
+            userLat: Double,
+            userLng: Double,
+            zoom: Double,
+            isExpanded: Boolean,
+            isDark: Boolean
+        ): WidgetMapRenderer.MapRenderRequest {
+            return WidgetMapRenderer.MapRenderRequest(
+                parkedLat = record.latitude,
+                parkedLng = record.longitude,
+                centerLat = centerLat,
+                centerLng = centerLng,
+                userLat = userLat,
+                userLng = userLng,
+                zoom = zoom,
+                isExpanded = isExpanded,
+                isDark = isDark,
+                travelMode = storage.getNavigationTravelMode(),
+                routeMode = storage.getWidgetRouteMode()
+            )
+        }
+
+        private fun computeWidgetDistanceDisplay(
+            appCtx: Context,
+            storage: ParkingStorage,
+            record: ParkingRecord,
+            userLat: Double,
+            userLng: Double
+        ): Pair<String?, Boolean> {
+            val directMetersFloat = DistanceCalculator.calculateDistanceMeters(
+                userLat,
+                userLng,
+                record.latitude,
+                record.longitude
+            )
+            if (directMetersFloat < 0f) return null to false
+            val directMeters = directMetersFloat.toDouble()
+
+            if (WidgetMapRenderer.shouldUseRoadRoute(storage.getWidgetRouteMode(), true, directMeters)) {
+                val cachedRoad = RouteFetcher.getCachedRoadRouteSync(
+                    userLat,
+                    userLng,
+                    record.latitude,
+                    record.longitude,
+                    storage.getNavigationTravelMode()
+                )
+                if (cachedRoad != null && cachedRoad.isRoadRoute && cachedRoad.points.size >= 2) {
+                    val routeMeters = max(directMeters, RouteFetcher.calculatePolylineMeters(cachedRoad.points))
+                    val formatted = appCtx.getString(
+                        R.string.widget_distance_route_format,
+                        DistanceCalculator.formatDistance(routeMeters.toFloat())
+                    )
+                    return formatted to true
+                }
+            }
+
+            val formatted = appCtx.getString(
+                R.string.widget_distance_away_format,
+                DistanceCalculator.formatDistance(directMetersFloat)
+            )
+            return formatted to false
+        }
+
+        private fun syncWidgetDistanceFromMemory(
+            appCtx: Context,
+            storage: ParkingStorage,
+            record: ParkingRecord,
+            userLat: Double,
+            userLng: Double
+        ) {
+            val (formatted, isRoadRoute) = computeWidgetDistanceDisplay(
+                appCtx = appCtx,
+                storage = storage,
+                record = record,
+                userLat = userLat,
+                userLng = userLng
+            )
+            if (formatted != null) {
+                storage.saveWidgetDistanceQuiet(record.id, formatted, isRoadRoute)
+            }
         }
 
         private fun updateAllWidgets(
@@ -809,6 +1035,7 @@ class ParkingSpotWidgetProvider : AppWidgetProvider() {
             } else {
                 bindNormalActiveMiddle(
                     context = context,
+                    storage = storage,
                     record = record,
                     views = views,
                     appWidgetId = appWidgetId,
@@ -858,8 +1085,55 @@ class ParkingSpotWidgetProvider : AppWidgetProvider() {
             )
         }
 
+        private fun seedUserLocationQuietlyIfMissing(
+            appCtx: Context,
+            storage: ParkingStorage,
+            record: ParkingRecord
+        ): Pair<Double, Double>? {
+            val storedLat = storage.getWidgetMapUserLat()
+            val storedLng = storage.getWidgetMapUserLng()
+            if (DistanceCalculator.isValidCoordinate(storedLat, storedLng)) {
+                return storedLat to storedLng
+            }
+            val locationManager = ParkingLocationManager(appCtx)
+            if (!locationManager.hasLocationPermission()) return null
+            val cached = locationManager.getLastKnownLocationSync() ?: return null
+            if (!DistanceCalculator.isValidCoordinate(cached.latitude, cached.longitude)) return null
+            val (formatted, isRoadRoute) = computeWidgetDistanceDisplay(
+                appCtx = appCtx,
+                storage = storage,
+                record = record,
+                userLat = cached.latitude,
+                userLng = cached.longitude
+            )
+            storage.saveWidgetDistanceAndUserLocationQuiet(
+                record.id,
+                formatted,
+                isRoadRoute,
+                cached.latitude,
+                cached.longitude,
+                storage.isWidgetMapCenteredOnUser()
+            )
+            return cached.latitude to cached.longitude
+        }
+
+        private fun resolveMapCenter(
+            storage: ParkingStorage,
+            record: ParkingRecord,
+            userLat: Double,
+            userLng: Double,
+            hasUser: Boolean
+        ): Pair<Double, Double> {
+            return if (storage.isWidgetMapCenteredOnUser() && hasUser) {
+                userLat to userLng
+            } else {
+                record.latitude to record.longitude
+            }
+        }
+
         private fun bindNormalActiveMiddle(
             context: Context,
+            storage: ParkingStorage,
             record: ParkingRecord,
             views: RemoteViews,
             appWidgetId: Int,
@@ -903,17 +1177,21 @@ class ParkingSpotWidgetProvider : AppWidgetProvider() {
                 }
             }
 
+            val isRoadDistance = storage.isWidgetDistanceRoadRoute(record.id)
+            val effectiveDistance = cachedDistance ?: storage.getWidgetDistanceText(record.id)
+
             if (isTiny) {
                 views.setViewVisibility(R.id.btnWidgetDistance, View.GONE)
             } else {
                 views.setViewVisibility(R.id.btnWidgetDistance, View.VISIBLE)
-                val hasDistance = !cachedDistance.isNullOrBlank()
+                val hasDistance = !effectiveDistance.isNullOrBlank()
                 val distanceLabel = when {
                     isMeasuringDistance -> context.getString(R.string.widget_getting_distance)
-                    hasDistance -> cachedDistance!!
+                    hasDistance -> effectiveDistance!!
                     else -> context.getString(R.string.widget_show_distance)
                 }
                 views.setTextViewText(R.id.tvWidgetDistance, distanceLabel)
+                applyDistanceIconTint(views, R.id.ivWidgetDistanceIcon, isRoadDistance, isDark)
                 views.setViewVisibility(
                     R.id.tvWidgetDistanceActionHint,
                     if (isMeasuringDistance) View.GONE else View.VISIBLE
@@ -930,13 +1208,14 @@ class ParkingSpotWidgetProvider : AppWidgetProvider() {
 
             if (canShowMiniMap) {
                 views.setViewVisibility(R.id.layoutWidgetMapFrame, View.VISIBLE)
-                val miniReq = WidgetMapRenderer.MapRenderRequest(
-                    parkedLat = record.latitude,
-                    parkedLng = record.longitude,
+                val userPair = seedUserLocationQuietlyIfMissing(context, storage, record)
+                val miniReq = buildMapRenderRequest(
+                    storage = storage,
+                    record = record,
                     centerLat = record.latitude,
                     centerLng = record.longitude,
-                    userLat = Double.NaN,
-                    userLng = Double.NaN,
+                    userLat = userPair?.first ?: Double.NaN,
+                    userLng = userPair?.second ?: Double.NaN,
                     zoom = 16.0,
                     isExpanded = false,
                     isDark = isDark
@@ -946,8 +1225,26 @@ class ParkingSpotWidgetProvider : AppWidgetProvider() {
                     ?: WidgetMapRenderer.renderFallbackBitmap(context, miniReq)
                 views.setImageViewBitmap(R.id.ivWidgetMiniMap, bitmapToShow)
 
+                val freshlySeededDistance = storage.getWidgetDistanceText(record.id)
+                if (!isTiny && effectiveDistance.isNullOrBlank() && !freshlySeededDistance.isNullOrBlank() && !isMeasuringDistance) {
+                    views.setTextViewText(R.id.tvWidgetDistance, freshlySeededDistance)
+                    applyDistanceIconTint(views, R.id.ivWidgetDistanceIcon, storage.isWidgetDistanceRoadRoute(record.id), isDark)
+                    views.setTextViewText(R.id.tvWidgetDistanceActionHint, context.getString(R.string.refresh_distance))
+                }
+
                 if (WidgetMapRenderer.getCachedBitmap(context, miniReq) == null) {
                     WidgetMapRenderer.renderMapAsync(context, miniReq) {
+                        val freshStorage = ParkingStorage(context)
+                        val freshRecord = freshStorage.getActiveRecord()
+                        if (freshRecord != null && DistanceCalculator.isValidCoordinate(miniReq.userLat, miniReq.userLng)) {
+                            syncWidgetDistanceFromMemory(
+                                context,
+                                freshStorage,
+                                freshRecord,
+                                miniReq.userLat,
+                                miniReq.userLng
+                            )
+                        }
                         updateAllWidgets(context, isSaving = false, isMeasuringDistance = false)
                     }
                 }
@@ -974,21 +1271,19 @@ class ParkingSpotWidgetProvider : AppWidgetProvider() {
             views.setViewVisibility(R.id.widgetExpandedMapContainer, View.VISIBLE)
 
             val zoom = storage.getWidgetMapZoom()
-            val userLat = storage.getWidgetMapUserLat()
-            val userLng = storage.getWidgetMapUserLng()
-            val hasUser = DistanceCalculator.isValidCoordinate(userLat, userLng)
-            val centerOnUser = storage.isWidgetMapCenteredOnUser() && hasUser
+            val userPair = seedUserLocationQuietlyIfMissing(context, storage, record)
+            val hasUser = userPair != null
+            val userLat = userPair?.first ?: Double.NaN
+            val userLng = userPair?.second ?: Double.NaN
+            val (centerLat, centerLng) = resolveMapCenter(storage, record, userLat, userLng, hasUser)
 
-            val centerLat = if (centerOnUser) userLat else record.latitude
-            val centerLng = if (centerOnUser) userLng else record.longitude
-
-            val mapReq = WidgetMapRenderer.MapRenderRequest(
-                parkedLat = record.latitude,
-                parkedLng = record.longitude,
+            val mapReq = buildMapRenderRequest(
+                storage = storage,
+                record = record,
                 centerLat = centerLat,
                 centerLng = centerLng,
-                userLat = if (hasUser) userLat else Double.NaN,
-                userLng = if (hasUser) userLng else Double.NaN,
+                userLat = userLat,
+                userLng = userLng,
                 zoom = zoom,
                 isExpanded = true,
                 isDark = isDark
@@ -1000,12 +1295,19 @@ class ParkingSpotWidgetProvider : AppWidgetProvider() {
             views.setImageViewBitmap(R.id.ivWidgetExpandedMap, displayBitmap)
 
             // Bottom-left: Distance badge (tappable to refresh live distance)
+            val effectiveDistance = cachedDistance ?: storage.getWidgetDistanceText(record.id)
             val distanceText = when {
                 isMeasuringDistance -> context.getString(R.string.widget_map_locating)
-                !cachedDistance.isNullOrBlank() -> cachedDistance
+                !effectiveDistance.isNullOrBlank() -> effectiveDistance
                 else -> context.getString(R.string.widget_show_distance)
             }
             views.setTextViewText(R.id.tvWidgetMapDistance, distanceText)
+            applyDistanceIconTint(
+                views,
+                R.id.ivWidgetMapDistanceIcon,
+                storage.isWidgetDistanceRoadRoute(record.id),
+                isDark
+            )
             views.setOnClickPendingIntent(
                 R.id.btnWidgetMapDistance,
                 buildBroadcastPendingIntent(context, appWidgetId * 20 + 9, ACTION_SHOW_DISTANCE)
@@ -1037,6 +1339,20 @@ class ParkingSpotWidgetProvider : AppWidgetProvider() {
                 R.id.btnWidgetMapPin,
                 buildBroadcastPendingIntent(context, appWidgetId * 20 + 15, ACTION_WIDGET_MAP_CENTER_PIN)
             )
+        }
+
+        private fun applyDistanceIconTint(
+            views: RemoteViews,
+            viewId: Int,
+            isRoadRoute: Boolean,
+            isDark: Boolean
+        ) {
+            val tint = if (isRoadRoute) {
+                Color.parseColor(if (isDark) "#8AB4F8" else "#1A73E8")
+            } else {
+                Color.parseColor(if (isDark) "#6DD58C" else "#146C2E")
+            }
+            views.setInt(viewId, "setColorFilter", tint)
         }
 
         private fun buildActivityPendingIntent(

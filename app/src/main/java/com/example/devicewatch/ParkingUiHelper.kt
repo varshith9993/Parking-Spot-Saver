@@ -1,28 +1,34 @@
 package com.example.devicewatch
 
-import android.app.Activity
+import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.location.Location
 import android.net.Uri
 import android.provider.Settings
 import android.text.InputType
+import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
-import android.view.ViewGroup
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.ProgressBar
 import android.widget.TextView
+import android.widget.Toast
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.StringRes
+import androidx.camera.core.CameraSelector
+import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.content.ContextCompat
 import androidx.core.content.res.ResourcesCompat
 import com.example.devicewatch.location.DistanceCalculator
 import com.example.devicewatch.location.NativeGeocoder
 import com.example.devicewatch.model.ParkingPhotoItem
 import com.example.devicewatch.model.ParkingRecord
+import com.example.devicewatch.navigation.NavigationManager
 import com.example.devicewatch.navigation.RoutePoint
 import com.example.devicewatch.storage.ParkingPhotoManager
 import com.google.android.material.bottomsheet.BottomSheetDialog
@@ -60,6 +66,12 @@ import java.text.DateFormat
 import java.util.Date
 
 internal object ParkingUiHelper {
+
+    private const val TAG = "ParkingUiHelper"
+    val LOCATION_PERMISSIONS = arrayOf(
+        Manifest.permission.ACCESS_FINE_LOCATION,
+        Manifest.permission.ACCESS_COARSE_LOCATION
+    )
 
     const val MAP_STYLE_URL = "https://tiles.openfreemap.org/styles/liberty"
     const val MAP_DEFAULT_ZOOM = 16.5
@@ -290,7 +302,8 @@ internal object ParkingUiHelper {
                     paddingPx
                 )
             )
-        } catch (_: Throwable) {
+        } catch (t: Throwable) {
+            Log.w(TAG, "Failed to fit route bounds", t)
         }
     }
 
@@ -334,24 +347,6 @@ internal object ParkingUiHelper {
                 R.string.photo_gps_available,
                 NativeGeocoder.formatCoordinates(photo.photoLatitude, photo.photoLongitude)
             )
-        } else {
-            context.getString(R.string.photo_gps_unavailable)
-        }
-    }
-
-    fun formatPhotoTimeText(context: Context, record: ParkingRecord): String {
-        val first = record.photos.firstOrNull()
-        return if (first != null) {
-            formatPhotoTimeText(context, first)
-        } else {
-            context.getString(R.string.photo_time_unavailable)
-        }
-    }
-
-    fun formatPhotoLocationText(context: Context, record: ParkingRecord): String {
-        val first = record.photos.firstOrNull()
-        return if (first != null) {
-            formatPhotoLocationText(context, first)
         } else {
             context.getString(R.string.photo_gps_unavailable)
         }
@@ -448,35 +443,6 @@ internal object ParkingUiHelper {
             }
         }
         builder.show()
-    }
-
-    fun showPhotoPreviewDialog(
-        activity: Activity,
-        photoManager: ParkingPhotoManager,
-        photoPath: String,
-        onMissing: () -> Unit
-    ) {
-        photoManager.loadSampledBitmap(photoPath, PREVIEW_REQ_SIZE, PREVIEW_REQ_SIZE) { bitmap ->
-            if (activity.isFinishing || activity.isDestroyed) return@loadSampledBitmap
-            if (bitmap == null) {
-                onMissing()
-                return@loadSampledBitmap
-            }
-            val previewImage = ImageView(activity).apply {
-                adjustViewBounds = true
-                scaleType = ImageView.ScaleType.FIT_CENTER
-                setImageBitmap(bitmap)
-                layoutParams = ViewGroup.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT
-                )
-            }
-            MaterialAlertDialogBuilder(activity)
-                .setTitle(R.string.photo_preview_title)
-                .setView(previewImage)
-                .setPositiveButton(R.string.close, null)
-                .show()
-        }
     }
 
     sealed class RecordDistanceState {
@@ -577,14 +543,112 @@ internal object ParkingUiHelper {
                     Uri.fromParts("package", context.packageName, null)
                 )
             )
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            Log.w(TAG, "Unable to open app permission settings", e)
         }
     }
 
     fun openDeviceLocationSettings(context: Context) {
         try {
             context.startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            Log.w(TAG, "Unable to open device location settings", e)
+        }
+    }
+
+    fun openDirectionsWithFeedback(context: Context, record: ParkingRecord, travelMode: String) {
+        val opened = NavigationManager.openDirections(
+            context,
+            record.latitude,
+            record.longitude,
+            travelMode
+        )
+        if (!opened) {
+            Toast.makeText(context, R.string.no_navigation_app, Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun shareRecordWithFeedback(context: Context, record: ParkingRecord) {
+        val shared = NavigationManager.shareParkingRecord(
+            context,
+            record,
+            context.getString(R.string.share_chooser_title)
+        )
+        if (!shared) {
+            Toast.makeText(context, R.string.share_unavailable, Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun extractCapturedPhotoItem(data: Intent?): ParkingPhotoItem? {
+        val photoPath = data?.getStringExtra(CameraCaptureActivity.EXTRA_PHOTO_PATH) ?: return null
+        val capturedAt = data.getLongExtra(CameraCaptureActivity.EXTRA_CAPTURED_AT, 0L)
+        val photoLat = data.getDoubleExtra(CameraCaptureActivity.EXTRA_PHOTO_LAT, Double.NaN)
+        val photoLng = data.getDoubleExtra(CameraCaptureActivity.EXTRA_PHOTO_LNG, Double.NaN)
+        return ParkingPhotoItem(photoPath, capturedAt, photoLat, photoLng, 0L)
+    }
+
+    fun bindRecordThumbnail(
+        photoManager: ParkingPhotoManager,
+        record: ParkingRecord,
+        cardThumb: View,
+        ivThumb: ImageView,
+        tvPhotoBadge: TextView,
+        thumbSize: Int
+    ) {
+        val photoPath = record.photoPath
+        if (record.photoCount > 1) {
+            tvPhotoBadge.text = cardThumb.context.getString(
+                R.string.photo_count_badge_format,
+                record.photoCount
+            )
+            tvPhotoBadge.visibility = View.VISIBLE
+        } else {
+            tvPhotoBadge.visibility = View.GONE
+        }
+        if (photoPath.isNullOrBlank()) {
+            ivThumb.tag = null
+            ivThumb.setImageDrawable(null)
+            cardThumb.visibility = View.GONE
+        } else if (ivThumb.tag != photoPath || ivThumb.drawable == null) {
+            ivThumb.tag = photoPath
+            ivThumb.setImageDrawable(null)
+            cardThumb.visibility = View.GONE
+            photoManager.loadSampledBitmap(photoPath, thumbSize, thumbSize) { bitmap ->
+                if (bitmap != null && ivThumb.tag == photoPath) {
+                    ivThumb.setImageBitmap(bitmap)
+                    cardThumb.visibility = View.VISIBLE
+                }
+            }
+        }
+    }
+
+    fun hasCameraSafely(provider: ProcessCameraProvider, selector: CameraSelector): Boolean {
+        return try {
+            provider.hasCamera(selector)
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to query camera availability", e)
+            false
+        }
+    }
+
+    fun launchPhotoPicker(
+        context: Context,
+        allowMultiple: Boolean,
+        launchPrimary: (PickVisualMediaRequest) -> Unit,
+        launchFallback: (Intent) -> Unit
+    ) {
+        try {
+            launchPrimary(
+                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "Photo Picker unavailable, falling back to GET_CONTENT", e)
+            try {
+                launchFallback(buildFallbackGalleryIntent(allowMultiple))
+            } catch (fallbackEx: Exception) {
+                Log.w(TAG, "Fallback photo picker unavailable", fallbackEx)
+                Toast.makeText(context, R.string.photo_picker_unavailable, Toast.LENGTH_SHORT).show()
+            }
         }
     }
 

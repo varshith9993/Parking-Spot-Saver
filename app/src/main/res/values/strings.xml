@@ -28,26 +28,16 @@
     <string name="pin_select_hint">Move the map so the pin marks your vehicle.</string>
     <string name="place_label_title">Place label</string>
     <string name="place_label_hint">Where did you park? (e.g. B2 near lift)</string>
-    <string name="place_label_optional_prompt_title">Where did you park?</string>
-    <string name="place_label_optional_prompt_hint">Optional, e.g. Level 3, Slot 24 or Beside Block C gate</string>
     <string name="add_place_label">Add place label</string>
     <string name="edit_place_label">Edit label</string>
-    <string name="skip">Skip</string>
-    <string name="save_this_location">Save this location</string>
     <string name="cancel">Cancel</string>
     <string name="location_saved_toast">Parking location saved</string>
 
     <!-- Home Empty & Active States -->
-    <string name="no_active_spot_title">No active parking spot</string>
-    <string name="no_active_spot_subtitle">Save your current GPS position or place a pin on the map.</string>
-    <string name="save_parking_location">Save Parking Location</string>
     <string name="navigate">Navigate</string>
     <string name="change_location">Change</string>
     <string name="change_location_title">Change parking location</string>
     <string name="use_current_gps">Use current GPS location</string>
-    <string name="remove_parking_spot">Remove parking spot</string>
-    <string name="remove_spot_confirm_title">Remove active parking spot?</string>
-    <string name="remove_spot_confirm_message">Removes the active spot from Home. Your Saved and History records stay intact.</string>
     <string name="remove">Remove</string>
 
     <!-- Location, Time & Distance -->
@@ -66,19 +56,14 @@
     <!-- Notes -->
     <string name="add_note">Add Note</string>
     <string name="edit_note">Edit Note</string>
-    <string name="remove_note">Remove</string>
     <string name="note_hint">Level, bay, or landmark (optional)</string>
     <string name="save">Save</string>
     <string name="no_note_placeholder">No note added</string>
 
     <!-- Photos & EXIF Metadata -->
     <string name="parking_photo_label">Parking Photo</string>
-    <string name="add_or_change_photo">Add / Change Photo</string>
     <string name="add_photo">Add Photo</string>
-    <string name="replace_photo">Change Photo</string>
-    <string name="remove_photo">Remove Photo</string>
     <string name="choose_photo_source">Parking Photo</string>
-    <string name="take_photo">Take Photo (Camera)</string>
     <string name="choose_from_gallery">Choose from Gallery</string>
     <string name="capture_photo">Capture Photo</string>
     <string name="camera_gps_checking">Checking GPS…</string>
@@ -88,11 +73,9 @@
     <string name="camera_capture_failed">Unable to capture photo. Please try again.</string>
     <string name="camera_unavailable">Camera is unavailable on this device.</string>
     <string name="photo_picker_unavailable">Photo picker is unavailable on this device.</string>
-    <string name="tap_to_preview">Tap to preview</string>
     <string name="photo_preview_title">Parking Photo</string>
     <string name="close">Close</string>
     <string name="photo_missing_notice">Saved photo file is missing or inaccessible.</string>
-    <string name="saving_photo">Saving photo &amp; metadata…</string>
     <string name="photo_captured_at">Photo captured: %1$s</string>
     <string name="photo_imported_at">Photo imported: %1$s (original capture time unavailable)</string>
     <string name="photo_time_unavailable">Photo capture time: Unavailable</string>
@@ -113,7 +96,6 @@
     <string name="action_view">View</string>
     <string name="delete">Delete</string>
     <string name="unsave">Unsave</string>
-    <string name="bookmark_toggle_label">Bookmark in Saved</string>
     <string name="bookmark_saved">Bookmarked in Saved</string>
     <string name="bookmark_unsaved">Removed from Saved</string>
     <string name="toggle_bookmark_desc">Toggle bookmark</string>
@@ -130,7 +112,6 @@
     <string name="history_search_hint">Search address, label, note, or coords</string>
     <string name="clear_search">Clear search</string>
     <string name="history_search_empty">No parking records match \"%1$s\".</string>
-    <string name="distance_unavailable">Distance unavailable</string>
     <string name="history_today">Today</string>
     <string name="history_yesterday">Yesterday</string>
     <string name="history_earlier">Earlier</string>
@@ -159,6 +140,12 @@
     <string name="nav_mode_label">Default mode</string>
     <string name="nav_mode_walking">Walking</string>
     <string name="nav_mode_driving">Driving</string>
+    <string name="settings_group_widget">Widget</string>
+    <string name="widget_route_pref_title">Widget map line &amp; distance</string>
+    <string name="widget_route_mode_green">Green dotted</string>
+    <string name="widget_route_mode_blue">Blue route</string>
+    <string name="widget_route_desc_green">Always shows a straight green dotted line and direct straight-line distance in the widget.</string>
+    <string name="widget_route_desc_blue">Shows the blue street route and road distance in the widget (switches to green dotted &amp; direct distance when very close).</string>
     <string name="settings_group_data">Data Management</string>
 
     <string name="perm_precise_title">Precise Location</string>
@@ -191,7 +178,6 @@
     <string name="shake_service_channel_name">Background Shake Detection</string>
     <string name="shake_alert_channel_name">Shake Spot Saved Alerts</string>
     <string name="shake_notif_title">Background Shake to Save active</string>
-    <string name="shake_notif_text">Shake continuously for 1s anytime to save your parking location.</string>
     <string name="shake_notif_text_format">Shake continuously for 1s anytime to save your spot (%1$s cooldown).</string>
     <string name="shake_saved_notif_title">Parking spot saved</string>
     <string name="shake_saved_notif_coords_text">Saved to History at %1$s (%2$s). Looking up street address — tap to view on map.</string>
@@ -220,7 +206,6 @@
     <string name="camera_retake">Retake</string>
     <string name="camera_use_photo">Use Photo</string>
     <string name="camera_switch_unavailable">Only one camera is available on this device.</string>
-    <string name="save_parking_spot">Save Parking Spot</string>
     <string name="saving_parking_spot">Saving Parking Spot…</string>
     <string name="save_new_parking_spot">Save New Spot</string>
     <string name="choose_on_map_short">Choose on Map</string>
@@ -240,14 +225,9 @@
 
     <!-- Home Cleanup, Map Select & Photo Chooser -->
     <string name="clear_all">Clear All</string>
-    <string name="clear_home_confirm_title">Clear Home form?</string>
-    <string name="clear_home_confirm_message">Resets the current Home location, address, note, and unattached photos. Existing Saved and History records stay intact.</string>
     <string name="home_cleared">Home form cleared</string>
     <string name="select">Select</string>
-    <string name="place_pin_button">Pin</string>
-    <string name="selected_location_badge">Selected location · Not saved yet</string>
     <string name="saved_spot_badge">Saved parking spot</string>
-    <string name="selected_location_ready_toast">Location selected — tap Save New Spot to save</string>
     <string name="photo_chooser_subtitle">Attach up to 5 photos using your camera or gallery.</string>
     <string name="take_a_photo">Take a Photo</string>
     <string name="take_a_photo_desc">Capture a photo using the in-app camera</string>
@@ -299,7 +279,6 @@
     <string name="qr_gallery_no_code">No QR code found in that image.</string>
     <string name="qr_gallery_read_error">Could not open that image.</string>
     <string name="qr_torch_toggle">Toggle flashlight</string>
-    <string name="qr_camera_permission_denied">Camera permission is needed to scan parking QR codes.</string>
     <string name="qr_camera_permission_denied_gallery_ok">Camera denied — you can pick a QR image from Gallery instead.</string>
     <string name="qr_scan_filled_coords">QR location updated — review and tap Save New Spot</string>
     <string name="qr_scan_filled_coords_and_label">QR location &amp; label filled — review and tap Save New Spot</string>
@@ -331,13 +310,11 @@
     <string name="widget_map_pin_desc">Center on parked pin</string>
     <string name="widget_map_zoom_badge">Zoom %.0f</string>
     <string name="widget_map_locating">Locating…</string>
-    <string name="widget_map_status_spot">Pinned spot · Zoom %.0f</string>
-    <string name="widget_map_status_user">Current GPS · Zoom %.0f</string>
-    <string name="widget_map_updating">Updating map…</string>
     <string name="widget_show_distance">Show Distance</string>
     <string name="widget_distance_check_hint">Check</string>
     <string name="widget_getting_distance">Getting distance…</string>
     <string name="widget_distance_away_format">%1$s away</string>
+    <string name="widget_distance_route_format">%1$s route</string>
     <string name="widget_saved_toast">Parking spot saved</string>
     <string name="widget_cleared_toast">Active spot cleared from widget</string>
     <string name="widget_location_permission_needed">Allow Location permission once so the widget can save GPS.</string>

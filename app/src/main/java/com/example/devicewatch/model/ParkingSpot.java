@@ -2,8 +2,6 @@ package com.example.devicewatch.model;
 
 import androidx.annotation.Nullable;
 
-import com.example.devicewatch.location.DistanceCalculator;
-
 /**
  * Immutable snapshot of a saved parking spot and optional photo metadata.
  */
@@ -47,19 +45,8 @@ public class ParkingSpot {
         this.photoLongitude = photoLongitude;
     }
 
-    public ParkingSpot(
-            double latitude,
-            double longitude,
-            long timestampMillis,
-            @Nullable String address,
-            @Nullable String note,
-            @Nullable String photoUri
-    ) {
-        this(latitude, longitude, timestampMillis, address, note, photoUri, 0L, 0L, Double.NaN, Double.NaN);
-    }
-
     public ParkingSpot(double latitude, double longitude, long timestampMillis) {
-        this(latitude, longitude, timestampMillis, null, null, null);
+        this(latitude, longitude, timestampMillis, null, null, null, 0L, 0L, Double.NaN, Double.NaN);
     }
 
     public double getLatitude() {
@@ -103,17 +90,5 @@ public class ParkingSpot {
 
     public double getPhotoLongitude() {
         return photoLongitude;
-    }
-
-    public boolean hasPhotoCapturedTimestamp() {
-        return photoCapturedAtMillis > 0L;
-    }
-
-    public boolean hasPhotoImportedTimestamp() {
-        return photoImportedAtMillis > 0L;
-    }
-
-    public boolean hasPhotoLocation() {
-        return DistanceCalculator.isValidCoordinate(photoLatitude, photoLongitude);
     }
 }

@@ -7,6 +7,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import com.example.devicewatch.model.ParkingRecord
+import com.example.devicewatch.navigation.RouteFetcher
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
@@ -403,7 +404,8 @@ internal class PlaceSearchClient(context: Context) {
                 }
             }
 
-            if (input.firstOrNull()?.uppercaseChar() in charArrayOf('N', 'S', 'E', 'W')) {
+            val firstUpper = input.firstOrNull()?.uppercaseChar()
+            if (firstUpper != null && firstUpper in charArrayOf('N', 'S', 'E', 'W')) {
                 val preHemi = HEMI_SPLIT_PRE_REGEX.find(input)
                 if (preHemi != null && preHemi.range.first > 0) {
                     val left = input.substring(0, preHemi.range.first).trim()
@@ -929,7 +931,7 @@ internal class PlaceSearchClient(context: Context) {
         val biasTag = if (biasLat != null && biasLng != null && postalQuery == null) {
             String.format(Locale.US, "%.1f,%.1f", biasLat, biasLng)
         } else {
-            postalQuery?.preferredCountry ?: "global"
+            postalQuery?.preferredCountryCode ?: "global"
         }
         val cacheKey = "${normalized.lowercase(Locale.US)}|$biasTag"
 
@@ -952,7 +954,7 @@ internal class PlaceSearchClient(context: Context) {
                 var postalHits = emptyList<PlaceSearchResult>()
                 try {
                     val json = executeHttpGet(
-                        buildNominatimPostalUrl(postalQuery.normalizedCode, postalQuery.preferredCountry)
+                        buildNominatimPostalUrl(postalQuery.normalizedCode, postalQuery.preferredCountryCode)
                     )
                     if (json != null) {
                         postalHits = parseNominatimResponse(json)
@@ -963,7 +965,7 @@ internal class PlaceSearchClient(context: Context) {
                     anyNetworkError = true
                 }
 
-                if (postalHits.isEmpty() && postalQuery.preferredCountry != null &&
+                if (postalHits.isEmpty() && postalQuery.preferredCountryCode != null &&
                     !isShutDown && requestSeq.get() == seq
                 ) {
                     try {
@@ -981,7 +983,7 @@ internal class PlaceSearchClient(context: Context) {
                 collectedOnline.addAll(postalHits)
 
                 if (collectedOnline.size < 2 && !isShutDown && requestSeq.get() == seq) {
-                    val fallbackQuery = if (postalQuery.preferredCountry == "in") {
+                    val fallbackQuery = if (postalQuery.preferredCountryCode == "in") {
                         "${postalQuery.normalizedCode} India"
                     } else {
                         postalQuery.normalizedCode

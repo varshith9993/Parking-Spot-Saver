@@ -92,67 +92,6 @@ public class ParkingRecord {
         );
     }
 
-    public ParkingRecord(
-            @NonNull String id,
-            double latitude,
-            double longitude,
-            @Nullable String placeLabel,
-            @Nullable String address,
-            long savedTimestamp,
-            @Nullable String note,
-            @Nullable String photoPath,
-            long originalCaptureTimestamp,
-            double photoLatitude,
-            double photoLongitude,
-            long importTimestamp
-    ) {
-        this(
-                id,
-                latitude,
-                longitude,
-                placeLabel,
-                address,
-                savedTimestamp,
-                note,
-                photoPath,
-                originalCaptureTimestamp,
-                photoLatitude,
-                photoLongitude,
-                importTimestamp,
-                false
-        );
-    }
-
-    public ParkingRecord(
-            @NonNull String id,
-            double latitude,
-            double longitude,
-            @Nullable String address,
-            long savedTimestamp,
-            @Nullable String note,
-            @Nullable String photoPath,
-            long originalCaptureTimestamp,
-            double photoLatitude,
-            double photoLongitude,
-            long importTimestamp
-    ) {
-        this(
-                id,
-                latitude,
-                longitude,
-                null,
-                address,
-                savedTimestamp,
-                note,
-                photoPath,
-                originalCaptureTimestamp,
-                photoLatitude,
-                photoLongitude,
-                importTimestamp,
-                false
-        );
-    }
-
     @NonNull
     private static List<ParkingPhotoItem> buildSinglePhotoList(
             @Nullable String photoPath,
@@ -172,16 +111,6 @@ public class ParkingRecord {
     @NonNull
     public static ParkingRecord createNew(double latitude, double longitude, long savedTimestamp) {
         return createNew(latitude, longitude, savedTimestamp, null, false);
-    }
-
-    @NonNull
-    public static ParkingRecord createNew(
-            double latitude,
-            double longitude,
-            long savedTimestamp,
-            @Nullable String placeLabel
-    ) {
-        return createNew(latitude, longitude, savedTimestamp, placeLabel, false);
     }
 
     @NonNull
@@ -307,14 +236,6 @@ public class ParkingRecord {
 
     public boolean isSaved() {
         return isSaved;
-    }
-
-    public boolean hasOriginalCaptureTimestamp() {
-        return getOriginalCaptureTimestamp() > 0L;
-    }
-
-    public boolean hasImportTimestamp() {
-        return getImportTimestamp() > 0L;
     }
 
     public boolean hasPhotoLocation() {

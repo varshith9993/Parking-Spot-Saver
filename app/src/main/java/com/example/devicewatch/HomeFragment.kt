@@ -11,7 +11,6 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.provider.Settings
 import android.text.Editable
 import android.text.TextWatcher
 import android.view.HapticFeedbackConstants
@@ -25,7 +24,6 @@ import android.widget.LinearLayout
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.IntentSenderRequest
-import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
@@ -109,6 +107,9 @@ class HomeFragment : Fragment() {
     private lateinit var placeSearchAdapter: PlaceSearchAdapter
     private var isPlaceSearchOpen = false
     private var pendingPlaceSearchRunnable: Runnable? = null
+    private var cachedLocalSearchRecords: List<ParkingRecord>? = null
+    private val dateFormatter = DateFormat.getDateInstance(DateFormat.MEDIUM)
+    private val timeFormatter = DateFormat.getTimeInstance(DateFormat.SHORT)
 
     private val placeSearchBackCallback = object : OnBackPressedCallback(false) {
         override fun handleOnBackPressed() {
@@ -241,13 +242,8 @@ class HomeFragment : Fragment() {
         if (!isAdded || _binding == null) return@registerForActivityResult
         if (result.resultCode != Activity.RESULT_OK || result.data == null) return@registerForActivityResult
 
-        val data = result.data ?: return@registerForActivityResult
-        val photoPath = data.getStringExtra(CameraCaptureActivity.EXTRA_PHOTO_PATH) ?: return@registerForActivityResult
-        val capturedAt = data.getLongExtra(CameraCaptureActivity.EXTRA_CAPTURED_AT, 0L)
-        val photoLat = data.getDoubleExtra(CameraCaptureActivity.EXTRA_PHOTO_LAT, Double.NaN)
-        val photoLng = data.getDoubleExtra(CameraCaptureActivity.EXTRA_PHOTO_LNG, Double.NaN)
-
-        val item = ParkingPhotoItem(photoPath, capturedAt, photoLat, photoLng, 0L)
+        val item = ParkingUiHelper.extractCapturedPhotoItem(result.data)
+            ?: return@registerForActivityResult
         attachSinglePhotoItem(item)
     }
 
@@ -456,6 +452,10 @@ class HomeFragment : Fragment() {
             view.getMapAsync { map ->
                 if (!isAdded || _binding == null) return@getMapAsync
                 mapLibreMap = map
+                map.uiSettings.apply {
+                    isLogoEnabled = false
+                    isAttributionEnabled = false
+                }
                 map.setStyle(Style.Builder().fromUri(ParkingUiHelper.MAP_STYLE_URL)) { style ->
                     if (!isAdded || _binding == null) return@setStyle
                     isMapStyleLoaded = true
@@ -645,6 +645,7 @@ class HomeFragment : Fragment() {
 
     private fun openPlaceSearchOverlay() {
         if (!isAdded || _binding == null) return
+        cachedLocalSearchRecords = null
         isPlaceSearchOpen = true
         placeSearchBackCallback.isEnabled = true
         binding.cardPlaceSearchOverlay.visibility = View.VISIBLE
@@ -668,6 +669,7 @@ class HomeFragment : Fragment() {
         pendingPlaceSearchRunnable?.let { elapsedHandler.removeCallbacks(it) }
         pendingPlaceSearchRunnable = null
         placeSearchClient?.cancelPending()
+        cachedLocalSearchRecords = null
         placeSearchBackCallback.isEnabled = false
         if (!isPlaceSearchOpen && _binding?.cardPlaceSearchOverlay?.visibility != View.VISIBLE) {
             return
@@ -708,6 +710,7 @@ class HomeFragment : Fragment() {
     }
 
     private fun collectLocalSearchRecords(): List<ParkingRecord> {
+        cachedLocalSearchRecords?.let { return it }
         if (!::parkingStorage.isInitialized) return emptyList()
         val combined = ArrayList<ParkingRecord>()
         val seenIds = HashSet<String>()
@@ -720,6 +723,7 @@ class HomeFragment : Fragment() {
         parkingStorage.getHistoryRecords().forEach {
             if (seenIds.add(it.id)) combined.add(it)
         }
+        cachedLocalSearchRecords = combined
         return combined
     }
 
@@ -822,6 +826,7 @@ class HomeFragment : Fragment() {
 
     fun refreshFromStorage(focusMap: Boolean) {
         if (!isAdded || _binding == null || !::parkingStorage.isInitialized) return
+        cachedLocalSearchRecords = null
         val previousActiveId = activeRecord?.id
         val nextActive = parkingStorage.getActiveRecord()
         activeRecord = nextActive
@@ -1013,6 +1018,7 @@ class HomeFragment : Fragment() {
             val nextSaved = !isFormSavedToSaved
             parkingStorage.setRecordSaved(existing.id, nextSaved)
             activeRecord = parkingStorage.getActiveRecord()
+            cachedLocalSearchRecords = null
             isFormSavedToSaved = nextSaved
             renderSheetState(focusMap = false)
             Toast.makeText(
@@ -1060,6 +1066,7 @@ class HomeFragment : Fragment() {
             )
             parkingStorage.saveNewActiveRecord(record)
             activeRecord = record
+            cachedLocalSearchRecords = null
             formTimestamp = record.savedTimestamp
             isFormSavedToSaved = saveToSavedList
             hasUnsavedFormChanges = false
@@ -1136,12 +1143,7 @@ class HomeFragment : Fragment() {
     }
 
     private fun requestLocationPermissions() {
-        locationPermissionLauncher.launch(
-            arrayOf(
-                Manifest.permission.ACCESS_FINE_LOCATION,
-                Manifest.permission.ACCESS_COARSE_LOCATION
-            )
-        )
+        locationPermissionLauncher.launch(ParkingUiHelper.LOCATION_PERMISSIONS)
     }
 
     private fun verifyGpsAndSaveSpot() {
@@ -1206,6 +1208,7 @@ class HomeFragment : Fragment() {
                 )
                 parkingStorage.saveNewActiveRecord(record)
                 activeRecord = record
+                cachedLocalSearchRecords = null
                 populateFormFromRecord(record)
 
                 renderSheetState(focusMap = true)
@@ -1417,17 +1420,20 @@ class HomeFragment : Fragment() {
             return
         }
         val date = Date(timestampMillis)
-        binding.tvHomeDate.text = DateFormat.getDateInstance(DateFormat.MEDIUM).format(date)
-        binding.tvHomeTime.text = DateFormat.getTimeInstance(DateFormat.SHORT).format(date)
+        binding.tvHomeDate.text = dateFormatter.format(date)
+        binding.tvHomeTime.text = timeFormatter.format(date)
         binding.tvHomeElapsed.text = ParkingUiHelper.formatElapsedDuration(timestampMillis)
     }
 
     private fun updateDistanceUI() {
         val target = draftLatLng ?: activeRecord?.let { LatLng(it.latitude, it.longitude) }
-        val distance = if (target != null) {
+        val userLoc = latestUserLocation
+        val distance = if (userLoc != null && target != null) {
             DistanceCalculator.calculateDistanceMeters(
-                latestUserLocation,
-                com.example.devicewatch.model.ParkingSpot(target.latitude, target.longitude, 0L)
+                userLoc.latitude,
+                userLoc.longitude,
+                target.latitude,
+                target.longitude
             )
         } else {
             -1f
@@ -1591,22 +1597,19 @@ class HomeFragment : Fragment() {
             Toast.makeText(requireContext(), R.string.photo_limit_reached, Toast.LENGTH_SHORT).show()
             return
         }
-        try {
-            val request = PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-            if (remainingSlots == 1) {
-                pickSingleMediaLauncher.launch(request)
-            } else {
-                pickMultipleMediaLauncher.launch(request)
-            }
-        } catch (_: Exception) {
-            try {
-                fallbackGalleryLauncher.launch(
-                    ParkingUiHelper.buildFallbackGalleryIntent(allowMultiple = remainingSlots > 1)
-                )
-            } catch (_: Exception) {
-                Toast.makeText(requireContext(), R.string.photo_picker_unavailable, Toast.LENGTH_SHORT).show()
-            }
-        }
+        val allowMultiple = remainingSlots > 1
+        ParkingUiHelper.launchPhotoPicker(
+            context = requireContext(),
+            allowMultiple = allowMultiple,
+            launchPrimary = { request ->
+                if (allowMultiple) {
+                    pickMultipleMediaLauncher.launch(request)
+                } else {
+                    pickSingleMediaLauncher.launch(request)
+                }
+            },
+            launchFallback = { fallbackGalleryLauncher.launch(it) }
+        )
     }
 
     private fun importSelectedGalleryUris(uris: List<Uri>) {
@@ -1794,6 +1797,7 @@ class HomeFragment : Fragment() {
         clearPendingPhotos()
         parkingStorage.clearActiveSpot()
         activeRecord = null
+        cachedLocalSearchRecords = null
         routeFetcher?.reset()
         ParkingUiHelper.clearRouteFromMap(mapLibreMap)
         formTimestamp = System.currentTimeMillis()
@@ -1807,10 +1811,13 @@ class HomeFragment : Fragment() {
 
         val resolvedLoc = draftLatLng
         if (resolvedLoc != null) {
-            val reusedAddress = if (prevLatLng != null && !prevAddress.isNullOrBlank()) {
+            val userLoc = latestUserLocation
+            val reusedAddress = if (userLoc != null && prevLatLng != null && !prevAddress.isNullOrBlank()) {
                 val dist = DistanceCalculator.calculateDistanceMeters(
-                    latestUserLocation,
-                    com.example.devicewatch.model.ParkingSpot(prevLatLng.latitude, prevLatLng.longitude, 0L)
+                    userLoc.latitude,
+                    userLoc.longitude,
+                    prevLatLng.latitude,
+                    prevLatLng.longitude
                 )
                 if (dist in 0f..15f) prevAddress else null
             } else {
@@ -1925,12 +1932,7 @@ class HomeFragment : Fragment() {
         } else {
             binding.btnBannerAction.setText(R.string.open_settings)
             binding.btnBannerAction.setOnClickListener {
-                startActivity(
-                    Intent(
-                        Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                        Uri.fromParts("package", requireContext().packageName, null)
-                    )
-                )
+                ParkingUiHelper.openAppPermissionSettings(requireContext())
             }
         }
         binding.cardStatusBanner.visibility = View.VISIBLE
@@ -1942,7 +1944,7 @@ class HomeFragment : Fragment() {
         binding.btnBannerAction.visibility = View.VISIBLE
         binding.btnBannerAction.setText(R.string.enable_gps)
         binding.btnBannerAction.setOnClickListener {
-            startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
+            ParkingUiHelper.openDeviceLocationSettings(requireContext())
         }
         binding.cardStatusBanner.visibility = View.VISIBLE
     }
@@ -2061,6 +2063,8 @@ class HomeFragment : Fragment() {
         stopElapsedTimer()
         pendingPlaceSearchRunnable?.let { elapsedHandler.removeCallbacks(it) }
         pendingPlaceSearchRunnable = null
+        elapsedHandler.removeCallbacksAndMessages(null)
+        cachedLocalSearchRecords = null
         placeSearchBackCallback.isEnabled = false
         placeSearchClient?.shutdown()
         placeSearchClient = null

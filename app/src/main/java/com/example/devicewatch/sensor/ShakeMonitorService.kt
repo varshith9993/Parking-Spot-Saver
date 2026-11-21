@@ -13,6 +13,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.util.Log
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
@@ -35,6 +36,7 @@ import java.util.UUID
 class ShakeMonitorService : Service() {
 
     companion object {
+        private const val TAG = "ShakeMonitorService"
         private const val ACTION_START = "com.example.devicewatch.action.START_SHAKE_MONITOR"
         private const val CHANNEL_SERVICE_ID = "shake_monitor_channel"
         private const val CHANNEL_ALERT_ID = "shake_saved_alert_channel"
@@ -54,7 +56,8 @@ class ShakeMonitorService : Service() {
             }
             try {
                 ContextCompat.startForegroundService(appCtx, intent)
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to start foreground shake monitor service", e)
             }
         }
 
@@ -62,7 +65,8 @@ class ShakeMonitorService : Service() {
             val appCtx = context.applicationContext
             try {
                 appCtx.stopService(Intent(appCtx, ShakeMonitorService::class.java))
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to stop shake monitor service", e)
             }
         }
     }
@@ -131,7 +135,8 @@ class ShakeMonitorService : Service() {
             ServiceCompat.startForeground(this, NOTIFICATION_SERVICE_ID, notification, fgType)
             isForegroundStarted = true
             true
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            Log.w(TAG, "Unable to promote ShakeMonitorService to foreground", e)
             false
         }
     }
@@ -258,7 +263,8 @@ class ShakeMonitorService : Service() {
         mainHandler.post {
             try {
                 Toast.makeText(applicationContext, message, Toast.LENGTH_LONG).show()
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                Log.w(TAG, "Unable to show toast from background service", e)
             }
         }
     }

@@ -15,9 +15,14 @@ import androidx.core.content.res.ResourcesCompat
 import com.example.devicewatch.ParkingUiHelper
 import com.example.devicewatch.R
 import com.example.devicewatch.location.DistanceCalculator
+import com.example.devicewatch.navigation.NavigationManager
+import com.example.devicewatch.navigation.RouteFetcher
+import com.example.devicewatch.navigation.RouteResult
+import com.example.devicewatch.storage.ParkingStorage
 import org.maplibre.android.MapLibre
 import org.maplibre.android.camera.CameraPosition
 import org.maplibre.android.geometry.LatLng
+import org.maplibre.android.maps.Style
 import org.maplibre.android.snapshotter.MapSnapshot
 import org.maplibre.android.snapshotter.MapSnapshotter
 import org.maplibre.android.utils.BitmapUtils
@@ -38,7 +43,8 @@ import kotlin.math.tan
 
 /**
  * High-speed MapLibre OpenFreeMap Liberty snapshot renderer with multi-entry LRU disk cache,
- * dashed walking-path overlay between user GPS and parked vehicle, and zero-flash fallback.
+ * OSRM blue street-route overlay (falling back to blue dashed when far/offline, or green dotted
+ * when very close), and zero-flash fallback.
  */
 object WidgetMapRenderer {
 
@@ -49,13 +55,17 @@ object WidgetMapRenderer {
     private const val EXPANDED_PIXEL_RATIO = 1.25f // 350x185 px
     private const val TILE_SIZE_PX = 256
     private const val CORNER_RADIUS_PX = 12f
-    private const val MAX_CACHED_MAP_FILES = 10
+    private const val MAX_CACHED_MAP_FILES = 14
     private const val CACHE_SUBDIR = "widget_maps"
     private const val CONNECT_TIMEOUT_MS = 3500
     private const val READ_TIMEOUT_MS = 4000
+    private const val ROUTE_CONNECT_TIMEOUT_MS = 2500
+    private const val ROUTE_READ_TIMEOUT_MS = 3000
+    private const val OFFLINE_ROUTE_RETRY_MS = 20_000L
+    internal const val NEAR_GREEN_DOTTED_METERS = 25.0
 
     private val mapExecutor = Executors.newSingleThreadExecutor()
-    private val mainHandler = Handler(Looper.getMainLooper())
+    private val mainHandler by lazy { Handler(Looper.getMainLooper()) }
     private val activeSnapshotters = ConcurrentHashMap<String, MapSnapshotter>()
     private val inFlightCallbacks = ConcurrentHashMap<String, CopyOnWriteArrayList<() -> Unit>>()
 
@@ -68,27 +78,68 @@ object WidgetMapRenderer {
         val userLng: Double,
         val zoom: Double,
         val isExpanded: Boolean,
-        val isDark: Boolean
+        val isDark: Boolean,
+        val travelMode: String = NavigationManager.TRAVEL_WALKING,
+        val routeMode: String = ParkingStorage.WIDGET_ROUTE_MODE_BLUE_AUTO
     ) {
         val cacheName: String get() = if (isExpanded) "full" else "mini"
+        val hasValidUser: Boolean get() = DistanceCalculator.isValidCoordinate(userLat, userLng)
+        val directDistanceMeters: Double
+            get() = if (hasValidUser) {
+                RouteFetcher.haversineMeters(userLat, userLng, parkedLat, parkedLng)
+            } else {
+                0.0
+            }
+        val usesRoadRoute: Boolean
+            get() = shouldUseRoadRoute(routeMode, hasValidUser, directDistanceMeters)
+        internal val routeModeTag: String
+            get() = when {
+                !hasValidUser -> "n"
+                routeMode == ParkingStorage.WIDGET_ROUTE_MODE_GREEN_DOTTED -> "green"
+                directDistanceMeters < NEAR_GREEN_DOTTED_METERS -> "near"
+                else -> RouteFetcher.resolveOsrmProfile(travelMode)
+            }
         val cacheKey: String
             get() = String.format(
                 Locale.US,
-                "%s_%.5f_%.5f_%.5f_%.5f_%.4f_%.4f_%.1f",
+                "%s_%.5f_%.5f_%.5f_%.5f_%.4f_%.4f_%.1f_%s",
                 cacheName,
                 parkedLat, parkedLng,
                 centerLat, centerLng,
                 if (userLat.isNaN()) 999.0 else userLat,
                 if (userLng.isNaN()) 999.0 else userLng,
-                zoom
+                zoom,
+                routeModeTag
             )
         val fileName: String get() = "${cacheName}_${cacheKey.hashCode().toUInt().toString(16)}.png"
+    }
+
+    internal fun shouldUseRoadRoute(
+        routeMode: String,
+        hasValidUser: Boolean,
+        directDistanceMeters: Double
+    ): Boolean {
+        return hasValidUser &&
+            routeMode != ParkingStorage.WIDGET_ROUTE_MODE_GREEN_DOTTED &&
+            directDistanceMeters >= NEAR_GREEN_DOTTED_METERS
     }
 
     fun getCachedBitmap(context: Context, req: MapRenderRequest): Bitmap? {
         val dir = File(context.cacheDir, CACHE_SUBDIR)
         val file = File(dir, req.fileName)
         if (!file.exists()) return null
+        if (req.usesRoadRoute) {
+            val hasRoadInMemory = RouteFetcher.getCachedRoadRouteSync(
+                req.userLat,
+                req.userLng,
+                req.parkedLat,
+                req.parkedLng,
+                req.travelMode
+            ) != null
+            if (!hasRoadInMemory && (System.currentTimeMillis() - file.lastModified()) > OFFLINE_ROUTE_RETRY_MS) {
+                return null
+            }
+        }
         return try {
             file.setLastModified(System.currentTimeMillis())
             BitmapFactory.decodeFile(file.absolutePath)
@@ -98,8 +149,8 @@ object WidgetMapRenderer {
     }
 
     /**
-     * Returns the most recent cached Liberty map for the current parked spot (even at another zoom
-     * or user position) so UI transitions stay smooth without flashing a grid placeholder.
+     * Returns the most recent cached Liberty map for the current parked spot and route mode so UI
+     * transitions stay smooth without flashing a stale line style or placeholder.
      */
     fun getPreviousSpotBitmapIfAvailable(context: Context, req: MapRenderRequest): Bitmap? {
         val dir = File(context.cacheDir, CACHE_SUBDIR)
@@ -108,7 +159,8 @@ object WidgetMapRenderer {
         if (!pointerKey.exists() || !pointerImg.exists()) return null
         return try {
             val parkedPrefix = String.format(Locale.US, "%s_%.5f_%.5f_", req.cacheName, req.parkedLat, req.parkedLng)
-            if (!pointerKey.readText().trim().startsWith(parkedPrefix)) return null
+            val savedKey = pointerKey.readText().trim()
+            if (!savedKey.startsWith(parkedPrefix) || !savedKey.endsWith("_${req.routeModeTag}")) return null
             val targetFile = File(pointerImg.readText().trim())
             if (targetFile.exists()) BitmapFactory.decodeFile(targetFile.absolutePath) else null
         } catch (_: Exception) {
@@ -126,7 +178,6 @@ object WidgetMapRenderer {
         canvas.save()
         canvas.clipPath(clipPath)
 
-        // OpenFreeMap Liberty daylight parchment base avoids dark/bright glitches
         canvas.drawColor(Color.parseColor("#EFECE6"))
 
         val minorRoad = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -157,18 +208,25 @@ object WidgetMapRenderer {
         canvas.drawLine(0f, h * 0.44f, w.toFloat(), h * 0.56f, majorRoad)
         canvas.drawLine(w * 0.56f, 0f, w * 0.46f, h.toFloat(), majorRoad)
 
-        val parkedPt = projectLatLngApprox(req.parkedLat, req.parkedLng, req.centerLat, req.centerLng, req.zoom, w, h)
-        val hasUser = DistanceCalculator.isValidCoordinate(req.userLat, req.userLng)
-        val userPt = if (hasUser) {
-            projectLatLngApprox(req.userLat, req.userLng, req.centerLat, req.centerLng, req.zoom, w, h)
+        val cachedRoad = if (req.usesRoadRoute) {
+            RouteFetcher.getCachedRoadRouteSync(
+                req.userLat,
+                req.userLng,
+                req.parkedLat,
+                req.parkedLng,
+                req.travelMode
+            )
         } else {
             null
         }
-        if (userPt != null) {
-            drawWalkingPathLine(canvas, userPt.first, userPt.second, parkedPt.first, parkedPt.second)
+        drawWidgetRouteOverlay(canvas, req, cachedRoad) { lat, lng ->
+            projectLatLngApprox(lat, lng, req.centerLat, req.centerLng, req.zoom, w, h)
         }
+
+        val parkedPt = projectLatLngApprox(req.parkedLat, req.parkedLng, req.centerLat, req.centerLng, req.zoom, w, h)
         drawParkedPin(context, canvas, parkedPt.first, parkedPt.second)
-        if (userPt != null) {
+        if (req.hasValidUser) {
+            val userPt = projectLatLngApprox(req.userLat, req.userLng, req.centerLat, req.centerLng, req.zoom, w, h)
             drawUserLocationPuck(canvas, userPt.first, userPt.second)
         }
 
@@ -194,6 +252,30 @@ object WidgetMapRenderer {
         list.add(onReady)
         if (!isFirstCaller) return
 
+        mapExecutor.execute {
+            val routeResult: RouteResult? = if (req.usesRoadRoute) {
+                RouteFetcher.fetchRouteBlocking(
+                    originLat = req.userLat,
+                    originLng = req.userLng,
+                    destLat = req.parkedLat,
+                    destLng = req.parkedLng,
+                    travelMode = req.travelMode,
+                    connectTimeoutMs = ROUTE_CONNECT_TIMEOUT_MS,
+                    readTimeoutMs = ROUTE_READ_TIMEOUT_MS
+                )
+            } else {
+                null
+            }
+            startSnapshotOrFallback(appCtx, req, routeResult, fullKey)
+        }
+    }
+
+    private fun startSnapshotOrFallback(
+        appCtx: Context,
+        req: MapRenderRequest,
+        routeResult: RouteResult?,
+        fullKey: String
+    ) {
         mainHandler.post {
             try {
                 MapLibre.getInstance(appCtx)
@@ -203,11 +285,11 @@ object WidgetMapRenderer {
 
                 val camera = CameraPosition.Builder()
                     .target(LatLng(req.centerLat, req.centerLng))
-                    .zoom(req.zoom.coerceIn(11.0, 19.0))
+                    .zoom(req.zoom.coerceIn(6.0, 19.0))
                     .build()
 
                 val options = MapSnapshotter.Options(logicalW, logicalH)
-                    .withStyle(ParkingUiHelper.MAP_STYLE_URL)
+                    .withStyleBuilder(Style.Builder().fromUri(ParkingUiHelper.MAP_STYLE_URL))
                     .withCameraPosition(camera)
                     .withPixelRatio(ratio)
                     .withLogo(false)
@@ -220,7 +302,7 @@ object WidgetMapRenderer {
                     object : MapSnapshotter.SnapshotReadyCallback {
                         override fun onSnapshotReady(snapshot: MapSnapshot) {
                             activeSnapshotters.remove(req.cacheName, snapshotter)
-                            val styledBitmap = compositePinsAndRoundCorners(appCtx, snapshot, req)
+                            val styledBitmap = compositePinsAndRoundCorners(appCtx, snapshot, req, routeResult)
                             mapExecutor.execute {
                                 try {
                                     writeBitmapToCache(appCtx, req, styledBitmap)
@@ -234,12 +316,12 @@ object WidgetMapRenderer {
                     object : MapSnapshotter.ErrorHandler {
                         override fun onError(error: String) {
                             activeSnapshotters.remove(req.cacheName, snapshotter)
-                            renderOsmRasterFallbackAsync(appCtx, req, fullKey)
+                            renderOsmRasterFallbackAsync(appCtx, req, routeResult, fullKey)
                         }
                     }
                 )
             } catch (_: Throwable) {
-                renderOsmRasterFallbackAsync(appCtx, req, fullKey)
+                renderOsmRasterFallbackAsync(appCtx, req, routeResult, fullKey)
             }
         }
     }
@@ -247,11 +329,12 @@ object WidgetMapRenderer {
     private fun renderOsmRasterFallbackAsync(
         appCtx: Context,
         req: MapRenderRequest,
+        routeResult: RouteResult?,
         fullKey: String
     ) {
         mapExecutor.execute {
             try {
-                val bmp = renderOsmTilesBitmap(appCtx, req)
+                val bmp = renderOsmTilesBitmap(appCtx, req, routeResult)
                 if (bmp != null) {
                     writeBitmapToCache(appCtx, req, bmp)
                     bmp.recycle()
@@ -275,7 +358,8 @@ object WidgetMapRenderer {
     private fun compositePinsAndRoundCorners(
         context: Context,
         snapshot: MapSnapshot,
-        req: MapRenderRequest
+        req: MapRenderRequest,
+        routeResult: RouteResult?
     ): Bitmap {
         val src = snapshot.bitmap
         val w = src.width
@@ -287,15 +371,15 @@ object WidgetMapRenderer {
         canvas.clipPath(clipPath)
         canvas.drawBitmap(src, 0f, 0f, null)
 
-        val parkedPt = snapshot.pixelForLatLng(LatLng(req.parkedLat, req.parkedLng))
-        val hasUser = DistanceCalculator.isValidCoordinate(req.userLat, req.userLng)
-        val userPt = if (hasUser) snapshot.pixelForLatLng(LatLng(req.userLat, req.userLng)) else null
-
-        if (userPt != null) {
-            drawWalkingPathLine(canvas, userPt.x, userPt.y, parkedPt.x, parkedPt.y)
+        drawWidgetRouteOverlay(canvas, req, routeResult) { lat, lng ->
+            val pt = snapshot.pixelForLatLng(LatLng(lat, lng))
+            pt.x to pt.y
         }
+
+        val parkedPt = snapshot.pixelForLatLng(LatLng(req.parkedLat, req.parkedLng))
         drawParkedPin(context, canvas, parkedPt.x, parkedPt.y)
-        if (userPt != null) {
+        if (req.hasValidUser) {
+            val userPt = snapshot.pixelForLatLng(LatLng(req.userLat, req.userLng))
             drawUserLocationPuck(canvas, userPt.x, userPt.y)
         }
 
@@ -304,12 +388,85 @@ object WidgetMapRenderer {
         return out
     }
 
-    private fun drawWalkingPathLine(
+    private fun drawWidgetRouteOverlay(
+        canvas: Canvas,
+        req: MapRenderRequest,
+        routeResult: RouteResult?,
+        projectPoint: (Double, Double) -> Pair<Float, Float>
+    ) {
+        if (!req.hasValidUser) return
+        val userPt = projectPoint(req.userLat, req.userLng)
+        val parkedPt = projectPoint(req.parkedLat, req.parkedLng)
+
+        if (!req.usesRoadRoute) {
+            drawGreenDottedPathLine(canvas, userPt.first, userPt.second, parkedPt.first, parkedPt.second)
+            return
+        }
+
+        if (routeResult != null && routeResult.isRoadRoute && routeResult.points.size >= 2) {
+            val screenPts = routeResult.points.map { projectPoint(it.latitude, it.longitude) }
+            drawSolidBlueStreetRoute(canvas, screenPts)
+        } else {
+            drawBlueDashedPathLine(canvas, userPt.first, userPt.second, parkedPt.first, parkedPt.second)
+        }
+    }
+
+    private fun drawSolidBlueStreetRoute(canvas: Canvas, points: List<Pair<Float, Float>>) {
+        if (points.size < 2) return
+        val path = Path().apply {
+            moveTo(points[0].first, points[0].second)
+            for (i in 1 until points.size) {
+                lineTo(points[i].first, points[i].second)
+            }
+        }
+        val casingPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
+            alpha = 235
+            strokeWidth = 9.0f
+            strokeCap = Paint.Cap.ROUND
+            strokeJoin = Paint.Join.ROUND
+            style = Paint.Style.STROKE
+        }
+        val bluePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.parseColor("#1A73E8")
+            strokeWidth = 5.5f
+            strokeCap = Paint.Cap.ROUND
+            strokeJoin = Paint.Join.ROUND
+            style = Paint.Style.STROKE
+        }
+        canvas.drawPath(path, casingPaint)
+        canvas.drawPath(path, bluePaint)
+    }
+
+    private fun drawBlueDashedPathLine(
         canvas: Canvas,
         x1: Float,
         y1: Float,
         x2: Float,
         y2: Float
+    ) {
+        drawDashedLine(canvas, x1, y1, x2, y2, Color.parseColor("#2563EB"), 4.5f, 7.5f)
+    }
+
+    private fun drawGreenDottedPathLine(
+        canvas: Canvas,
+        x1: Float,
+        y1: Float,
+        x2: Float,
+        y2: Float
+    ) {
+        drawDashedLine(canvas, x1, y1, x2, y2, Color.parseColor("#146C2E"), 4.0f, 7.0f)
+    }
+
+    private fun drawDashedLine(
+        canvas: Canvas,
+        x1: Float,
+        y1: Float,
+        x2: Float,
+        y2: Float,
+        lineColor: Int,
+        lineWidth: Float,
+        haloWidth: Float
     ) {
         val dx = x2 - x1
         val dy = y2 - y1
@@ -322,15 +479,15 @@ object WidgetMapRenderer {
         val dash = DashPathEffect(floatArrayOf(12f, 8f), 0f)
         val haloPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.WHITE
-            alpha = 210
-            strokeWidth = 7f
+            alpha = 215
+            strokeWidth = haloWidth
             strokeCap = Paint.Cap.ROUND
             style = Paint.Style.STROKE
             pathEffect = dash
         }
         val linePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#146C2E")
-            strokeWidth = 4f
+            color = lineColor
+            strokeWidth = lineWidth
             strokeCap = Paint.Cap.ROUND
             style = Paint.Style.STROKE
             pathEffect = dash
@@ -401,8 +558,12 @@ object WidgetMapRenderer {
         canvas.drawCircle(cx, cy, 7.5f, corePaint)
     }
 
-    private fun renderOsmTilesBitmap(context: Context, req: MapRenderRequest): Bitmap? {
-        val z = req.zoom.roundToInt().coerceIn(11, 18)
+    private fun renderOsmTilesBitmap(
+        context: Context,
+        req: MapRenderRequest,
+        routeResult: RouteResult?
+    ): Bitmap? {
+        val z = req.zoom.roundToInt().coerceIn(6, 18)
         val w = if (req.isExpanded) (EXPANDED_LOGICAL_W * EXPANDED_PIXEL_RATIO).toInt() else (MINI_LOGICAL_DP * MINI_PIXEL_RATIO).toInt()
         val h = if (req.isExpanded) (EXPANDED_LOGICAL_H * EXPANDED_PIXEL_RATIO).toInt() else (MINI_LOGICAL_DP * MINI_PIXEL_RATIO).toInt()
 
@@ -455,15 +616,14 @@ object WidgetMapRenderer {
             return null
         }
 
-        val parkedPt = projectLatLngApprox(req.parkedLat, req.parkedLng, req.centerLat, req.centerLng, z.toDouble(), w, h)
-        val hasUser = DistanceCalculator.isValidCoordinate(req.userLat, req.userLng)
-        val userPt = if (hasUser) projectLatLngApprox(req.userLat, req.userLng, req.centerLat, req.centerLng, z.toDouble(), w, h) else null
-
-        if (userPt != null) {
-            drawWalkingPathLine(canvas, userPt.first, userPt.second, parkedPt.first, parkedPt.second)
+        drawWidgetRouteOverlay(canvas, req, routeResult) { lat, lng ->
+            projectLatLngApprox(lat, lng, req.centerLat, req.centerLng, z.toDouble(), w, h)
         }
+
+        val parkedPt = projectLatLngApprox(req.parkedLat, req.parkedLng, req.centerLat, req.centerLng, z.toDouble(), w, h)
         drawParkedPin(context, canvas, parkedPt.first, parkedPt.second)
-        if (userPt != null) {
+        if (req.hasValidUser) {
+            val userPt = projectLatLngApprox(req.userLat, req.userLng, req.centerLat, req.centerLng, z.toDouble(), w, h)
             drawUserLocationPuck(canvas, userPt.first, userPt.second)
         }
 
@@ -527,7 +687,6 @@ object WidgetMapRenderer {
             File(dir, "latest_${req.cacheName}.key").writeText(req.cacheKey)
             File(dir, "latest_${req.cacheName}.path").writeText(dest.absolutePath)
 
-            // Trim old LRU PNG cache entries beyond MAX_CACHED_MAP_FILES
             val cachedPngs = dir.listFiles { f -> f.isFile && f.name.endsWith(".png") }
             if (cachedPngs != null && cachedPngs.size > MAX_CACHED_MAP_FILES) {
                 cachedPngs.sortedBy { it.lastModified() }

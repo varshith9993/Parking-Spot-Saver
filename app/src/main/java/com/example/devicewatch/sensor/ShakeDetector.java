@@ -85,19 +85,26 @@ public class ShakeDetector implements SensorEventListener {
     public ShakeDetector(@NonNull Context context, @NonNull OnShakeListener listener) {
         Context appContext = context.getApplicationContext();
         this.sensorManager = (SensorManager) appContext.getSystemService(Context.SENSOR_SERVICE);
-        Sensor chosenSensor = null;
-        boolean useLinear = false;
-        if (sensorManager != null) {
-            chosenSensor = sensorManager.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION);
-            if (chosenSensor != null) {
-                useLinear = true;
-            } else {
-                chosenSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
-            }
-        }
+        Sensor chosenSensor = resolvePreferredSensor(this.sensorManager);
         this.activeSensor = chosenSensor;
-        this.usesLinearAccelerationSensor = useLinear;
+        this.usesLinearAccelerationSensor = chosenSensor != null
+                && chosenSensor.getType() == Sensor.TYPE_LINEAR_ACCELERATION;
         this.listener = listener;
+    }
+
+    @Nullable
+    private static Sensor resolvePreferredSensor(@Nullable SensorManager manager) {
+        if (manager == null) {
+            return null;
+        }
+        Sensor linear = manager.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION);
+        return linear != null ? linear : manager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
+    }
+
+    public static boolean isSensorAvailable(@NonNull Context context) {
+        SensorManager manager = (SensorManager) context.getApplicationContext()
+                .getSystemService(Context.SENSOR_SERVICE);
+        return resolvePreferredSensor(manager) != null;
     }
 
     /**

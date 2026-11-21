@@ -332,32 +332,38 @@ public class ParkingDatabaseHelper extends SQLiteOpenHelper {
     public List<String> clearHistoryPreservingSaved() {
         List<String> deletedPhotos = new ArrayList<>();
         SQLiteDatabase db = getWritableDatabase();
-        try (Cursor cursor = db.query(
-                TABLE_RECORDS,
-                new String[]{COL_PHOTO_PATH, COL_PHOTOS_JSON},
-                COL_IS_SAVED + " = 0",
-                null,
-                null,
-                null,
-                null
-        )) {
-            while (cursor.moveToNext()) {
-                String path = cursor.getString(0);
-                if (path != null && !path.trim().isEmpty()) {
-                    deletedPhotos.add(path);
-                }
-                List<ParkingPhotoItem> items = ParkingPhotoItem.fromJsonString(cursor.getString(1));
-                for (ParkingPhotoItem item : items) {
-                    if (!deletedPhotos.contains(item.getFilePath())) {
-                        deletedPhotos.add(item.getFilePath());
+        db.beginTransaction();
+        try {
+            try (Cursor cursor = db.query(
+                    TABLE_RECORDS,
+                    new String[]{COL_PHOTO_PATH, COL_PHOTOS_JSON},
+                    COL_IS_SAVED + " = 0",
+                    null,
+                    null,
+                    null,
+                    null
+            )) {
+                while (cursor.moveToNext()) {
+                    String path = cursor.getString(0);
+                    if (path != null && !path.trim().isEmpty()) {
+                        deletedPhotos.add(path);
+                    }
+                    List<ParkingPhotoItem> items = ParkingPhotoItem.fromJsonString(cursor.getString(1));
+                    for (ParkingPhotoItem item : items) {
+                        if (!deletedPhotos.contains(item.getFilePath())) {
+                            deletedPhotos.add(item.getFilePath());
+                        }
                     }
                 }
             }
+            db.delete(TABLE_RECORDS, COL_IS_SAVED + " = 0", null);
+            ContentValues values = new ContentValues();
+            values.put(COL_IN_HISTORY, 0);
+            db.update(TABLE_RECORDS, values, COL_IS_SAVED + " = 1", null);
+            db.setTransactionSuccessful();
+        } finally {
+            db.endTransaction();
         }
-        db.delete(TABLE_RECORDS, COL_IS_SAVED + " = 0", null);
-        ContentValues values = new ContentValues();
-        values.put(COL_IN_HISTORY, 0);
-        db.update(TABLE_RECORDS, values, COL_IS_SAVED + " = 1", null);
         return deletedPhotos;
     }
 
@@ -366,11 +372,12 @@ public class ParkingDatabaseHelper extends SQLiteOpenHelper {
     }
 
     public boolean isPhotoReferenced(@NonNull String photoPath) {
+        String escapedPath = photoPath.replace("/", "\\/");
         try (Cursor cursor = getReadableDatabase().query(
                 TABLE_RECORDS,
                 new String[]{COL_PHOTO_PATH, COL_PHOTOS_JSON},
-                COL_PHOTO_PATH + " = ? OR " + COL_PHOTOS_JSON + " IS NOT NULL",
-                new String[]{photoPath},
+                COL_PHOTO_PATH + " = ? OR " + COL_PHOTOS_JSON + " LIKE ? OR " + COL_PHOTOS_JSON + " LIKE ?",
+                new String[]{photoPath, "%" + photoPath + "%", "%" + escapedPath + "%"},
                 null,
                 null,
                 null

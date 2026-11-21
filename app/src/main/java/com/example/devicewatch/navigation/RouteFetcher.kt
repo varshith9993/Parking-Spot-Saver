@@ -73,6 +73,17 @@ internal class RouteFetcher {
             return EARTH_RADIUS_METERS * c
         }
 
+        internal fun calculatePolylineMeters(points: List<RoutePoint>): Double {
+            if (points.size < 2) return 0.0
+            var total = 0.0
+            for (i in 0 until points.size - 1) {
+                val a = points[i]
+                val b = points[i + 1]
+                total += haversineMeters(a.latitude, a.longitude, b.latitude, b.longitude)
+            }
+            return total
+        }
+
         internal fun buildOsrmUrl(
             originLat: Double,
             originLng: Double,
@@ -219,6 +230,110 @@ internal class RouteFetcher {
                 isRoadRoute = false
             )
         }
+
+        private const val SHARED_CACHE_MAX = 16
+        private val sharedCacheLock = Any()
+        private val sharedRoadCache = object : LinkedHashMap<String, List<RoutePoint>>(SHARED_CACHE_MAX, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, List<RoutePoint>>?): Boolean {
+                return size > SHARED_CACHE_MAX
+            }
+        }
+
+        private fun buildRouteCacheKey(
+            originLat: Double,
+            originLng: Double,
+            destLat: Double,
+            destLng: Double,
+            travelMode: String
+        ): String {
+            return String.format(
+                Locale.US,
+                "%.4f,%.4f>%.5f,%.5f|%s",
+                originLat,
+                originLng,
+                destLat,
+                destLng,
+                resolveOsrmProfile(travelMode)
+            )
+        }
+
+        internal fun getCachedRoadRouteSync(
+            originLat: Double,
+            originLng: Double,
+            destLat: Double,
+            destLng: Double,
+            travelMode: String
+        ): RouteResult? {
+            if (!isValidCoord(originLat, originLng) || !isValidCoord(destLat, destLng)) return null
+            val key = buildRouteCacheKey(originLat, originLng, destLat, destLng, travelMode)
+            val cachedRoad = synchronized(sharedCacheLock) { sharedRoadCache[key] } ?: return null
+            val connected = buildConnectedRoutePoints(originLat, originLng, destLat, destLng, cachedRoad)
+            return if (connected.size >= 2) RouteResult(connected, isRoadRoute = true) else null
+        }
+
+        internal fun fetchRouteBlocking(
+            originLat: Double,
+            originLng: Double,
+            destLat: Double,
+            destLng: Double,
+            travelMode: String,
+            connectTimeoutMs: Int = CONNECT_TIMEOUT_MS,
+            readTimeoutMs: Int = READ_TIMEOUT_MS
+        ): RouteResult {
+            if (!isValidCoord(originLat, originLng) || !isValidCoord(destLat, destLng)) {
+                return RouteResult(emptyList(), isRoadRoute = false)
+            }
+            val directMeters = haversineMeters(originLat, originLng, destLat, destLng)
+            if (directMeters < MIN_ROUTE_DISTANCE_METERS) {
+                return RouteResult(emptyList(), isRoadRoute = false)
+            }
+            getCachedRoadRouteSync(originLat, originLng, destLat, destLng, travelMode)?.let {
+                return it
+            }
+            val key = buildRouteCacheKey(originLat, originLng, destLat, destLng, travelMode)
+            val requestUrl = buildOsrmUrl(originLat, originLng, destLat, destLng, travelMode)
+            return try {
+                val body = executeHttpGet(requestUrl, connectTimeoutMs, readTimeoutMs)
+                val roadPoints = if (body != null) parseOsrmGeoJsonCoordinates(body) else emptyList()
+                val connected = buildConnectedRoutePoints(originLat, originLng, destLat, destLng, roadPoints)
+                if (connected.size >= 2) {
+                    synchronized(sharedCacheLock) {
+                        sharedRoadCache[key] = roadPoints
+                    }
+                    RouteResult(connected, isRoadRoute = true)
+                } else {
+                    fallbackStraightRoute(originLat, originLng, destLat, destLng)
+                }
+            } catch (_: Exception) {
+                fallbackStraightRoute(originLat, originLng, destLat, destLng)
+            }
+        }
+
+        private fun executeHttpGet(
+            urlString: String,
+            connectTimeoutMs: Int,
+            readTimeoutMs: Int
+        ): String? {
+            var connection: HttpURLConnection? = null
+            return try {
+                connection = (URL(urlString).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "GET"
+                    connectTimeout = connectTimeoutMs
+                    readTimeout = readTimeoutMs
+                    setRequestProperty("User-Agent", "DeviceWatch-ParkingSpotSaver/1.0")
+                    setRequestProperty("Accept", "application/json")
+                }
+                if (connection.responseCode !in 200..299) {
+                    null
+                } else {
+                    BufferedReader(InputStreamReader(connection.inputStream, StandardCharsets.UTF_8)).use { reader ->
+                        reader.readText()
+                    }
+                }
+            } finally {
+                connection?.disconnect()
+            }
+        }
     }
 
     private val executor: ExecutorService = Executors.newSingleThreadExecutor()
@@ -294,50 +409,15 @@ internal class RouteFetcher {
         lastAttemptElapsedMs = SystemClock.elapsedRealtime()
 
         val seq = requestSeq.incrementAndGet()
-        val requestUrl = buildOsrmUrl(originLat, originLng, destLat, destLng, travelMode)
 
         executor.execute {
-            val result = try {
-                val body = executeHttpGet(requestUrl)
-                val roadPoints = if (body != null) parseOsrmGeoJsonCoordinates(body) else emptyList()
-                val connected = buildConnectedRoutePoints(originLat, originLng, destLat, destLng, roadPoints)
-                if (connected.size >= 2) {
-                    RouteResult(connected, isRoadRoute = true)
-                } else {
-                    fallbackStraightRoute(originLat, originLng, destLat, destLng)
-                }
-            } catch (_: Exception) {
-                fallbackStraightRoute(originLat, originLng, destLat, destLng)
-            }
-
+            val result = fetchRouteBlocking(originLat, originLng, destLat, destLng, travelMode)
             mainHandler.post {
                 if (!isShutDown && requestSeq.get() == seq) {
                     lastResult = result
                     onResult(result)
                 }
             }
-        }
-    }
-
-    private fun executeHttpGet(urlString: String): String? {
-        var connection: HttpURLConnection? = null
-        return try {
-            connection = (URL(urlString).openConnection() as HttpURLConnection).apply {
-                requestMethod = "GET"
-                connectTimeout = CONNECT_TIMEOUT_MS
-                readTimeout = READ_TIMEOUT_MS
-                setRequestProperty("User-Agent", "DeviceWatch-ParkingSpotSaver/1.0")
-                setRequestProperty("Accept", "application/json")
-            }
-            if (connection.responseCode !in 200..299) {
-                null
-            } else {
-                BufferedReader(InputStreamReader(connection.inputStream, StandardCharsets.UTF_8)).use { reader ->
-                    reader.readText()
-                }
-            }
-        } finally {
-            connection?.disconnect()
         }
     }
 

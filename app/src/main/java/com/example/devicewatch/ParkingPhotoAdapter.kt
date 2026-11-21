@@ -36,7 +36,7 @@ class ParkingPhotoAdapter(
     }
 
     override fun onBindViewHolder(holder: PhotoViewHolder, position: Int) {
-        holder.bind(items[position], position)
+        holder.bind(items[position])
     }
 
     override fun getItemCount(): Int = items.size
@@ -45,7 +45,7 @@ class ParkingPhotoAdapter(
         private val binding: ItemParkingPhotoThumbBinding
     ) : RecyclerView.ViewHolder(binding.root) {
 
-        fun bind(item: ParkingPhotoItem, position: Int) {
+        fun bind(item: ParkingPhotoItem) {
             val samePhotoLoaded = binding.ivPhotoThumb.tag == item.filePath &&
                 binding.ivPhotoThumb.drawable != null
             if (!samePhotoLoaded) {

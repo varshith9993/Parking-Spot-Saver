@@ -1,7 +1,7 @@
 package com.example.devicewatch.storage;
 
-import android.content.res.AssetFileDescriptor;
 import android.content.Context;
+import android.content.res.AssetFileDescriptor;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Matrix;
@@ -9,6 +9,8 @@ import android.location.Location;
 import android.net.Uri;
 import android.os.Handler;
 import android.os.Looper;
+import android.util.Log;
+import android.util.LruCache;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -30,7 +32,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Manages parking photo persistence in app-private storage, EXIF metadata preservation,
- * and safe background bitmap decoding.
+ * and cached background bitmap decoding.
  */
 public class ParkingPhotoManager {
 
@@ -66,13 +68,25 @@ public class ParkingPhotoManager {
         void onBitmapLoaded(@Nullable Bitmap bitmap);
     }
 
+    private static final String TAG = "ParkingPhotoManager";
     private static final String PHOTOS_DIR = "parking_photos";
     private static final int BUFFER_SIZE = 8192;
     private static final AtomicInteger FILE_SEQUENCE = new AtomicInteger(0);
+    private static final ExecutorService SHARED_EXECUTOR = Executors.newFixedThreadPool(2);
+    private static final int CACHE_SIZE_KB = Math.max(
+            1024,
+            (int) Math.min(Runtime.getRuntime().maxMemory() / 1024L / 12L, 12L * 1024L)
+    );
+    private static final LruCache<String, Bitmap> BITMAP_CACHE = new LruCache<String, Bitmap>(CACHE_SIZE_KB) {
+        @Override
+        protected int sizeOf(@NonNull String key, @NonNull Bitmap value) {
+            return Math.max(1, value.getByteCount() / 1024);
+        }
+    };
 
     private final Context appContext;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
-    private final ExecutorService executor = Executors.newSingleThreadExecutor();
+    private volatile boolean isShutDown = false;
 
     public ParkingPhotoManager(@NonNull Context context) {
         this.appContext = context.getApplicationContext();
@@ -99,11 +113,13 @@ public class ParkingPhotoManager {
             @Nullable String previousPhotoPath,
             @NonNull PhotoMetadataCallback callback
     ) {
-        if (executor.isShutdown()) {
-            postError(callback, "Photo manager is unavailable.");
+        if (isShutDown) {
             return;
         }
-        executor.execute(() -> {
+        SHARED_EXECUTOR.execute(() -> {
+            if (isShutDown) {
+                return;
+            }
             File destFile = null;
             try {
                 destFile = createPersistentPhotoFile();
@@ -183,11 +199,13 @@ public class ParkingPhotoManager {
             @Nullable String previousPhotoPath,
             @NonNull PhotoMetadataCallback callback
     ) {
-        if (executor.isShutdown()) {
-            postError(callback, "Photo manager is unavailable.");
+        if (isShutDown) {
             return;
         }
-        executor.execute(() -> {
+        SHARED_EXECUTOR.execute(() -> {
+            if (isShutDown) {
+                return;
+            }
             try {
                 if (!capturedFile.exists() || capturedFile.length() == 0L) {
                     deleteFileQuietly(capturedFile);
@@ -234,22 +252,39 @@ public class ParkingPhotoManager {
             int reqHeight,
             @NonNull BitmapLoadCallback callback
     ) {
-        if (photoPath == null || photoPath.trim().isEmpty() || executor.isShutdown()) {
-            mainHandler.post(() -> callback.onBitmapLoaded(null));
+        if (isShutDown) {
             return;
         }
-        executor.execute(() -> {
+        if (photoPath == null || photoPath.trim().isEmpty()) {
+            postBitmap(callback, null);
+            return;
+        }
+        String cacheKey = buildCacheKey(photoPath, reqWidth, reqHeight);
+        Bitmap cached = BITMAP_CACHE.get(cacheKey);
+        if (cached != null && !cached.isRecycled()) {
+            if (Looper.myLooper() == Looper.getMainLooper()) {
+                callback.onBitmapLoaded(cached);
+            } else {
+                postBitmap(callback, cached);
+            }
+            return;
+        }
+
+        SHARED_EXECUTOR.execute(() -> {
+            if (isShutDown) {
+                return;
+            }
             try {
                 File file = new File(photoPath);
                 if (!file.exists() || !file.isFile() || !file.canRead()) {
-                    mainHandler.post(() -> callback.onBitmapLoaded(null));
+                    postBitmap(callback, null);
                     return;
                 }
                 BitmapFactory.Options bounds = new BitmapFactory.Options();
                 bounds.inJustDecodeBounds = true;
                 BitmapFactory.decodeFile(photoPath, bounds);
                 if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
-                    mainHandler.post(() -> callback.onBitmapLoaded(null));
+                    postBitmap(callback, null);
                     return;
                 }
 
@@ -257,25 +292,28 @@ public class ParkingPhotoManager {
                 decodeOpts.inSampleSize = calculateInSampleSize(bounds, reqWidth, reqHeight);
                 Bitmap bitmap = BitmapFactory.decodeFile(photoPath, decodeOpts);
                 Bitmap oriented = applyExifOrientation(photoPath, bitmap);
-                mainHandler.post(() -> callback.onBitmapLoaded(oriented));
+                if (oriented != null && !oriented.isRecycled()) {
+                    BITMAP_CACHE.put(cacheKey, oriented);
+                }
+                postBitmap(callback, oriented);
             } catch (Exception | OutOfMemoryError e) {
-                mainHandler.post(() -> callback.onBitmapLoaded(null));
+                Log.w(TAG, "Failed to decode sampled bitmap", e);
+                postBitmap(callback, null);
             }
         });
     }
 
     public void deletePhotoFile(@Nullable String photoPath) {
-        if (photoPath == null || photoPath.trim().isEmpty() || executor.isShutdown()) {
+        if (photoPath == null || photoPath.trim().isEmpty()) {
             return;
         }
-        executor.execute(() -> deletePhotoFileSync(photoPath));
+        evictCacheForPath(photoPath);
+        SHARED_EXECUTOR.execute(() -> deletePhotoFileSync(photoPath));
     }
 
     public void deleteAllParkingPhotos() {
-        if (executor.isShutdown()) {
-            return;
-        }
-        executor.execute(() -> {
+        BITMAP_CACHE.evictAll();
+        SHARED_EXECUTOR.execute(() -> {
             File photosDir = new File(appContext.getFilesDir(), PHOTOS_DIR);
             File[] files = photosDir.listFiles();
             if (files == null) {
@@ -290,7 +328,22 @@ public class ParkingPhotoManager {
     }
 
     public void shutdown() {
-        executor.shutdown();
+        isShutDown = true;
+        mainHandler.removeCallbacksAndMessages(null);
+    }
+
+    @NonNull
+    private static String buildCacheKey(@NonNull String photoPath, int reqWidth, int reqHeight) {
+        return photoPath + "|" + reqWidth + "|" + reqHeight;
+    }
+
+    private static void evictCacheForPath(@NonNull String photoPath) {
+        String prefix = photoPath + "|";
+        for (String key : BITMAP_CACHE.snapshot().keySet()) {
+            if (key.startsWith(prefix)) {
+                BITMAP_CACHE.remove(key);
+            }
+        }
     }
 
     @NonNull
@@ -320,7 +373,7 @@ public class ParkingPhotoManager {
                 lng = latLong[1];
             }
         } catch (Exception | OutOfMemoryError ignored) {
-            // File may be a PNG/WebP/HEIC without standard EXIF; record import time below without failing.
+            // File may be PNG/WebP/HEIC without standard EXIF; fall back to import timestamp below.
         }
 
         long importedAt = capturedAt > 0L ? 0L : System.currentTimeMillis();
@@ -354,8 +407,8 @@ public class ParkingPhotoManager {
                 exif.setGpsInfo(captureLocation);
             }
             exif.saveAttributes();
-        } catch (IOException | IllegalArgumentException ignored) {
-            // Keep photo saved even if container format does not support EXIF attribute editing.
+        } catch (IOException | IllegalArgumentException e) {
+            Log.w(TAG, "Unable to write EXIF metadata", e);
         }
     }
 
@@ -368,7 +421,8 @@ public class ParkingPhotoManager {
                     && DistanceCalculator.isValidCoordinate(latLong[0], latLong[1])) {
                 return latLong;
             }
-        } catch (IOException ignored) {
+        } catch (IOException e) {
+            Log.w(TAG, "Unable to read EXIF GPS tags", e);
         }
         return null;
     }
@@ -386,6 +440,7 @@ public class ParkingPhotoManager {
         if (photoPath == null || photoPath.trim().isEmpty()) {
             return;
         }
+        evictCacheForPath(photoPath);
         try {
             File photosDir = new File(appContext.getFilesDir(), PHOTOS_DIR).getCanonicalFile();
             File target = new File(photoPath).getCanonicalFile();
@@ -393,14 +448,14 @@ public class ParkingPhotoManager {
             if (target.exists() && target.getPath().startsWith(photosDir.getPath() + File.separator)) {
                 deleteFileQuietly(target);
             }
-        } catch (IOException ignored) {
+        } catch (IOException e) {
+            Log.w(TAG, "Failed to delete photo file", e);
         }
     }
 
     private static void deleteFileQuietly(@NonNull File file) {
-        if (file.exists()) {
-            //noinspection ResultOfMethodCallIgnored
-            file.delete();
+        if (file.exists() && !file.delete()) {
+            Log.w(TAG, "Could not delete file: " + file.getName());
         }
     }
 
@@ -436,6 +491,7 @@ public class ParkingPhotoManager {
             }
             return rotated;
         } catch (Exception | OutOfMemoryError e) {
+            Log.w(TAG, "Unable to apply EXIF orientation", e);
             return bitmap;
         }
     }
@@ -463,11 +519,27 @@ public class ParkingPhotoManager {
         return Math.max(1, inSampleSize);
     }
 
+    private void postBitmap(@NonNull BitmapLoadCallback callback, @Nullable Bitmap bitmap) {
+        mainHandler.post(() -> {
+            if (!isShutDown) {
+                callback.onBitmapLoaded(bitmap);
+            }
+        });
+    }
+
     private void postReady(@NonNull PhotoMetadataCallback callback, @NonNull PhotoMetadata metadata) {
-        mainHandler.post(() -> callback.onPhotoReady(metadata));
+        mainHandler.post(() -> {
+            if (!isShutDown) {
+                callback.onPhotoReady(metadata);
+            }
+        });
     }
 
     private void postError(@NonNull PhotoMetadataCallback callback, @NonNull String message) {
-        mainHandler.post(() -> callback.onPhotoError(message));
+        mainHandler.post(() -> {
+            if (!isShutDown) {
+                callback.onPhotoError(message);
+            }
+        });
     }
 }

@@ -11,7 +11,6 @@ import com.example.devicewatch.location.DistanceCalculator;
 import com.example.devicewatch.model.ParkingHistoryEntry;
 import com.example.devicewatch.model.ParkingPhotoItem;
 import com.example.devicewatch.model.ParkingRecord;
-import com.example.devicewatch.model.ParkingSpot;
 import com.example.devicewatch.navigation.NavigationManager;
 import com.example.devicewatch.sensor.ShakeDetector;
 import com.example.devicewatch.widget.ParkingSpotWidgetProvider;
@@ -54,6 +53,7 @@ public class ParkingStorage {
     private static final String KEY_IS_SAVED = "is_saved";
     private static final String KEY_WIDGET_DIST_RECORD_ID = "widget_dist_record_id";
     private static final String KEY_WIDGET_DIST_TEXT = "widget_dist_text";
+    private static final String KEY_WIDGET_DIST_IS_ROUTE = "widget_dist_is_route";
     private static final String KEY_WIDGET_MAP_EXPANDED = "widget_map_expanded";
     private static final String KEY_WIDGET_MAP_ZOOM = "widget_map_zoom";
     private static final String KEY_WIDGET_MAP_USER_LAT = "widget_map_user_lat";
@@ -71,6 +71,10 @@ public class ParkingStorage {
     private static final String KEY_QR_AUTO_FLASH = "qr_auto_flash_enabled";
     private static final String KEY_THEME_MODE = "appearance_theme_mode";
     private static final String KEY_NAV_TRAVEL_MODE = "nav_travel_mode";
+    private static final String KEY_WIDGET_ROUTE_MODE = "widget_route_mode";
+
+    public static final String WIDGET_ROUTE_MODE_BLUE_AUTO = "blue_auto";
+    public static final String WIDGET_ROUTE_MODE_GREEN_DOTTED = "green_dotted";
 
     public static final long[] SHAKE_COOLDOWN_OPTIONS_MS = {
             3_000L, 5_000L, 10_000L, 20_000L, 30_000L, 60_000L, 120_000L, 300_000L
@@ -160,31 +164,6 @@ public class ParkingStorage {
         ParkingSpotWidgetProvider.updateAllWidgets(appContext);
     }
 
-    public void saveParkingSpot(@NonNull ParkingSpot spot) {
-        String id = prefs.getString(KEY_ACTIVE_RECORD_ID, null);
-        if (id == null || id.isEmpty()) {
-            id = UUID.randomUUID().toString();
-        }
-        ParkingRecord existing = db.getRecordById(id);
-        ParkingRecord record = new ParkingRecord(
-                id,
-                spot.getLatitude(),
-                spot.getLongitude(),
-                existing != null ? existing.getPlaceLabel() : null,
-                spot.getAddress(),
-                spot.getTimestampMillis(),
-                spot.getNote(),
-                spot.getPhotoUri(),
-                spot.getPhotoCapturedAtMillis(),
-                spot.getPhotoLatitude(),
-                spot.getPhotoLongitude(),
-                spot.getPhotoImportedAtMillis(),
-                existing != null && existing.isSaved()
-        );
-        db.upsertRecord(record, true);
-        writeActiveRecordToPrefs(record);
-    }
-
     private void writeActiveRecordToPrefs(@NonNull ParkingRecord record) {
         List<ParkingPhotoItem> photos = record.getPhotos();
         prefs.edit()
@@ -205,6 +184,7 @@ public class ParkingStorage {
                 .putBoolean(KEY_IS_SAVED, record.isSaved())
                 .remove(KEY_WIDGET_DIST_RECORD_ID)
                 .remove(KEY_WIDGET_DIST_TEXT)
+                .remove(KEY_WIDGET_DIST_IS_ROUTE)
                 .remove(KEY_WIDGET_MAP_EXPANDED)
                 .remove(KEY_WIDGET_MAP_CENTER_USER)
                 .remove(KEY_WIDGET_MAP_USER_LAT)
@@ -227,17 +207,11 @@ public class ParkingStorage {
 
     public double getWidgetMapZoom() {
         float zoom = prefs.getFloat(KEY_WIDGET_MAP_ZOOM, 16.0f);
-        return Math.max(11.0, Math.min(19.0, (double) zoom));
-    }
-
-    public void setWidgetMapZoom(double zoom) {
-        double clamped = Math.max(11.0, Math.min(19.0, zoom));
-        prefs.edit().putFloat(KEY_WIDGET_MAP_ZOOM, (float) clamped).apply();
-        ParkingSpotWidgetProvider.updateAllWidgets(appContext);
+        return Math.max(6.0, Math.min(19.0, (double) zoom));
     }
 
     public void setWidgetMapZoomQuiet(double zoom) {
-        double clamped = Math.max(11.0, Math.min(19.0, zoom));
+        double clamped = Math.max(6.0, Math.min(19.0, zoom));
         prefs.edit().putFloat(KEY_WIDGET_MAP_ZOOM, (float) clamped).apply();
     }
 
@@ -257,18 +231,10 @@ public class ParkingStorage {
                 : Double.NaN;
     }
 
-    public void setWidgetMapUserLocation(double lat, double lng, boolean centerOnUser) {
-        prefs.edit()
-                .putLong(KEY_WIDGET_MAP_USER_LAT, Double.doubleToRawLongBits(lat))
-                .putLong(KEY_WIDGET_MAP_USER_LNG, Double.doubleToRawLongBits(lng))
-                .putBoolean(KEY_WIDGET_MAP_CENTER_USER, centerOnUser)
-                .apply();
-        ParkingSpotWidgetProvider.updateAllWidgets(appContext);
-    }
-
     public void saveWidgetDistanceAndUserLocationQuiet(
             @NonNull String recordId,
             @Nullable String distanceText,
+            boolean isRoadRoute,
             double lat,
             double lng,
             boolean centerOnUser
@@ -279,13 +245,36 @@ public class ParkingStorage {
                 .putBoolean(KEY_WIDGET_MAP_CENTER_USER, centerOnUser);
         if (distanceText != null) {
             editor.putString(KEY_WIDGET_DIST_RECORD_ID, recordId)
-                    .putString(KEY_WIDGET_DIST_TEXT, distanceText);
+                    .putString(KEY_WIDGET_DIST_TEXT, distanceText)
+                    .putBoolean(KEY_WIDGET_DIST_IS_ROUTE, isRoadRoute);
         }
         editor.apply();
     }
 
+    public void saveWidgetDistanceQuiet(
+            @NonNull String recordId,
+            @Nullable String distanceText,
+            boolean isRoadRoute
+    ) {
+        if (distanceText == null) {
+            prefs.edit()
+                    .remove(KEY_WIDGET_DIST_RECORD_ID)
+                    .remove(KEY_WIDGET_DIST_TEXT)
+                    .remove(KEY_WIDGET_DIST_IS_ROUTE)
+                    .apply();
+            return;
+        }
+        prefs.edit()
+                .putString(KEY_WIDGET_DIST_RECORD_ID, recordId)
+                .putString(KEY_WIDGET_DIST_TEXT, distanceText)
+                .putBoolean(KEY_WIDGET_DIST_IS_ROUTE, isRoadRoute)
+                .apply();
+    }
+
     public void resetWidgetMapCenterToSpot() {
-        prefs.edit().putBoolean(KEY_WIDGET_MAP_CENTER_USER, false).apply();
+        prefs.edit()
+                .putBoolean(KEY_WIDGET_MAP_CENTER_USER, false)
+                .apply();
     }
 
     @Nullable
@@ -297,12 +286,12 @@ public class ParkingStorage {
         return prefs.getString(KEY_WIDGET_DIST_TEXT, null);
     }
 
-    public void setWidgetDistanceText(@NonNull String recordId, @Nullable String distanceText) {
-        prefs.edit()
-                .putString(KEY_WIDGET_DIST_RECORD_ID, recordId)
-                .putString(KEY_WIDGET_DIST_TEXT, distanceText)
-                .apply();
-        ParkingSpotWidgetProvider.updateAllWidgets(appContext);
+    public boolean isWidgetDistanceRoadRoute(@NonNull String recordId) {
+        String storedId = prefs.getString(KEY_WIDGET_DIST_RECORD_ID, null);
+        if (!recordId.equals(storedId)) {
+            return false;
+        }
+        return prefs.getBoolean(KEY_WIDGET_DIST_IS_ROUTE, false);
     }
 
     @Nullable
@@ -365,12 +354,6 @@ public class ParkingStorage {
         );
     }
 
-    @Nullable
-    public ParkingSpot getParkingSpot() {
-        ParkingRecord active = getActiveRecord();
-        return active != null ? active.toParkingSpot() : null;
-    }
-
     public boolean hasSavedParkingSpot() {
         return prefs.getBoolean(KEY_HAS_SPOT, false)
                 && prefs.contains(KEY_LATITUDE)
@@ -404,14 +387,6 @@ public class ParkingStorage {
         }
     }
 
-    public void updateActiveAddress(@Nullable String address) {
-        ParkingRecord active = getActiveRecord();
-        if (active == null) {
-            return;
-        }
-        updateRecordAddress(active.getId(), address);
-    }
-
     public void updateRecordAddress(@NonNull String recordId, @Nullable String address) {
         ParkingRecord active = getActiveRecord();
         boolean isActive = active != null && active.getId().equals(recordId);
@@ -422,22 +397,6 @@ public class ParkingStorage {
         if (isActive) {
             ParkingSpotWidgetProvider.updateAllWidgets(appContext);
         }
-    }
-
-    public void updateParkingAddress(@Nullable String address) {
-        updateActiveAddress(address);
-    }
-
-    public void updateActiveNote(@Nullable String note) {
-        ParkingRecord active = getActiveRecord();
-        if (active == null) {
-            return;
-        }
-        updateRecordNote(active.getId(), note);
-    }
-
-    public void updateParkingNote(@Nullable String note) {
-        updateActiveNote(note);
     }
 
     public void updateRecordNote(@NonNull String recordId, @Nullable String note) {
@@ -519,59 +478,9 @@ public class ParkingStorage {
         return removed;
     }
 
-    public void updateParkingPhoto(@Nullable String photoUri) {
-        ParkingRecord active = getActiveRecord();
-        if (active == null) {
-            return;
-        }
-        if (photoUri == null) {
-            updateRecordPhotos(active.getId(), Collections.emptyList());
-        } else {
-            updateRecordPhotos(
-                    active.getId(),
-                    Collections.singletonList(
-                            new ParkingPhotoItem(photoUri, 0L, Double.NaN, Double.NaN, System.currentTimeMillis())
-                    )
-            );
-        }
-    }
-
-    public void updateParkingPhotoWithMetadata(
-            @Nullable String photoUri,
-            long photoCapturedAtMillis,
-            long photoImportedAtMillis,
-            double photoLatitude,
-            double photoLongitude
-    ) {
-        ParkingRecord active = getActiveRecord();
-        if (active == null) {
-            return;
-        }
-        if (photoUri == null) {
-            updateRecordPhotos(active.getId(), Collections.emptyList());
-        } else {
-            updateRecordPhotos(
-                    active.getId(),
-                    Collections.singletonList(
-                            new ParkingPhotoItem(
-                                    photoUri,
-                                    photoCapturedAtMillis,
-                                    photoLatitude,
-                                    photoLongitude,
-                                    photoImportedAtMillis
-                            )
-                    )
-            );
-        }
-    }
-
     public void clearActiveSpot() {
         prefs.edit().clear().apply();
         ParkingSpotWidgetProvider.updateAllWidgets(appContext);
-    }
-
-    public void clearParkingSpot() {
-        clearActiveSpot();
     }
 
     @NonNull
@@ -610,11 +519,6 @@ public class ParkingStorage {
             return null;
         }
         return db.getRecordById(id);
-    }
-
-    @Nullable
-    public ParkingRecord getHistoryRecordById(@Nullable String id) {
-        return getRecordById(id);
     }
 
     public int getHistoryRecordsCount() {
@@ -785,5 +689,20 @@ public class ParkingStorage {
                 ? NavigationManager.TRAVEL_DRIVING
                 : NavigationManager.TRAVEL_WALKING;
         settingsPrefs.edit().putString(KEY_NAV_TRAVEL_MODE, normalized).apply();
+    }
+
+    @NonNull
+    public String getWidgetRouteMode() {
+        String mode = settingsPrefs.getString(KEY_WIDGET_ROUTE_MODE, WIDGET_ROUTE_MODE_BLUE_AUTO);
+        return WIDGET_ROUTE_MODE_GREEN_DOTTED.equals(mode)
+                ? WIDGET_ROUTE_MODE_GREEN_DOTTED
+                : WIDGET_ROUTE_MODE_BLUE_AUTO;
+    }
+
+    public void setWidgetRouteMode(@NonNull String mode) {
+        String normalized = WIDGET_ROUTE_MODE_GREEN_DOTTED.equals(mode)
+                ? WIDGET_ROUTE_MODE_GREEN_DOTTED
+                : WIDGET_ROUTE_MODE_BLUE_AUTO;
+        settingsPrefs.edit().putString(KEY_WIDGET_ROUTE_MODE, normalized).apply();
     }
 }

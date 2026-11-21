@@ -151,4 +151,25 @@ class RouteFetcherTest {
         assertFalse(fallback.isRoadRoute)
         assertEquals(2, fallback.points.size)
     }
+
+    @Test
+    fun calculatePolylineMetersHandlesEmptyDetourAndStraightSegments() {
+        assertEquals(0.0, RouteFetcher.calculatePolylineMeters(emptyList()), 0.001)
+        assertEquals(
+            0.0,
+            RouteFetcher.calculatePolylineMeters(listOf(RoutePoint(17.385, 78.486))),
+            0.001
+        )
+
+        val a = RoutePoint(17.3850, 78.4860)
+        val mid = RoutePoint(17.3865, 78.4880)
+        val b = RoutePoint(17.3870, 78.4860)
+        val straightMeters = RouteFetcher.haversineMeters(a.latitude, a.longitude, b.latitude, b.longitude)
+        val detourMeters = RouteFetcher.calculatePolylineMeters(listOf(a, mid, b))
+        val expected = RouteFetcher.haversineMeters(a.latitude, a.longitude, mid.latitude, mid.longitude) +
+            RouteFetcher.haversineMeters(mid.latitude, mid.longitude, b.latitude, b.longitude)
+
+        assertEquals(expected, detourMeters, 0.001)
+        assertTrue(detourMeters > straightMeters)
+    }
 }
