@@ -22,12 +22,14 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.example.devicewatch.databinding.ActivityRecordDetailBinding
+import com.example.devicewatch.location.DistanceCalculator
 import com.example.devicewatch.location.NativeGeocoder
 import com.example.devicewatch.location.ParkingLocationManager
 import com.example.devicewatch.model.ParkingPhotoItem
 import com.example.devicewatch.model.ParkingRecord
 import com.example.devicewatch.model.RelativeTimeFormatter
 import com.example.devicewatch.navigation.NavigationManager
+import com.example.devicewatch.navigation.RouteFetcher
 import com.example.devicewatch.storage.ParkingPhotoManager
 import com.example.devicewatch.storage.ParkingStorage
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
@@ -47,6 +49,9 @@ class ParkingRecordDetailActivity : AppCompatActivity() {
         const val MODE_SAVED = "mode_saved"
         const val MODE_HISTORY = "mode_history"
         private const val RELATIVE_TIME_REFRESH_MS = 60_000L
+        private const val ROUTE_FIT_MIN_METERS = 15f
+        private const val ROUTE_FIT_MAX_METERS = 50_000f
+        private const val ROUTE_FIT_PADDING_DP = 44
     }
 
     private lateinit var binding: ActivityRecordDetailBinding
@@ -65,6 +70,9 @@ class ParkingRecordDetailActivity : AppCompatActivity() {
     private var latestUserLocation: Location? = null
     private var centerMapOnNextLocation = false
     private var isLiveMapUpdatesActive = false
+    private val routeFetcher = RouteFetcher()
+    private var hasAutoFittedInitialRoute = false
+    private var hasUserInteractedWithMap = false
 
     private val relativeTimeHandler = Handler(Looper.getMainLooper())
     private val relativeTimeTickRunnable = object : Runnable {
@@ -237,12 +245,22 @@ class ParkingRecordDetailActivity : AppCompatActivity() {
         binding.btnDetailBack.setOnClickListener { finish() }
         binding.btnDetailTopShare.setOnClickListener { shareCurrentRecord() }
         binding.btnDetailBookmark.setOnClickListener { toggleBookmark() }
-        binding.btnDetailZoomIn.setOnClickListener { ParkingUiHelper.zoomIn(mapLibreMap) }
-        binding.btnDetailZoomOut.setOnClickListener { ParkingUiHelper.zoomOut(mapLibreMap) }
-        binding.btnDetailMyLocation.setOnClickListener { onDetailMyLocationClicked() }
+        binding.btnDetailZoomIn.setOnClickListener {
+            hasUserInteractedWithMap = true
+            ParkingUiHelper.zoomIn(mapLibreMap)
+        }
+        binding.btnDetailZoomOut.setOnClickListener {
+            hasUserInteractedWithMap = true
+            ParkingUiHelper.zoomOut(mapLibreMap)
+        }
+        binding.btnDetailMyLocation.setOnClickListener {
+            hasUserInteractedWithMap = true
+            onDetailMyLocationClicked()
+        }
         binding.btnDetailCenterSpot.setOnClickListener {
             val map = mapLibreMap ?: return@setOnClickListener
             val active = currentRecord ?: return@setOnClickListener
+            hasUserInteractedWithMap = true
             centerMapOnNextLocation = false
             ParkingUiHelper.showRecordOnMap(map, isMapStyleLoaded, active, animateCamera = true)
         }
@@ -650,13 +668,22 @@ class ParkingRecordDetailActivity : AppCompatActivity() {
                     isRotateGesturesEnabled = true
                     isQuickZoomGesturesEnabled = true
                 }
+                map.addOnCameraMoveStartedListener { reason ->
+                    if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) {
+                        hasUserInteractedWithMap = true
+                    }
+                }
                 map.setStyle(Style.Builder().fromUri(ParkingUiHelper.MAP_STYLE_URL)) { style ->
                     if (isFinishing || isDestroyed) return@setStyle
                     isMapStyleLoaded = true
                     ParkingUiHelper.ensureMarkerLayer(this, style)
+                    if (latestUserLocation == null && locationManager.hasLocationPermission()) {
+                        latestUserLocation = locationManager.getLastKnownLocationSync()
+                    }
                     activateDetailLocationPuckIfReady()
                     binding.tvDetailMapFallback.visibility = View.GONE
                     ParkingUiHelper.showRecordOnMap(map, true, record)
+                    updateDetailRouteIfReady()
                 }
             }
         } catch (_: Throwable) {
@@ -691,6 +718,7 @@ class ParkingRecordDetailActivity : AppCompatActivity() {
             latestUserLocation = cached
             ParkingUiHelper.updateUserLocationPuck(mapLibreMap, cached)
             animateCameraToLocation(cached)
+            updateDetailRouteIfReady()
         } else {
             centerMapOnNextLocation = true
             fetchAndCenterCurrentLocation()
@@ -708,6 +736,7 @@ class ParkingRecordDetailActivity : AppCompatActivity() {
                     centerMapOnNextLocation = false
                     animateCameraToLocation(location)
                 }
+                updateDetailRouteIfReady()
             }
 
             override fun onLocationError(message: String) {
@@ -740,12 +769,48 @@ class ParkingRecordDetailActivity : AppCompatActivity() {
                     centerMapOnNextLocation = false
                     animateCameraToLocation(location)
                 }
+                updateDetailRouteIfReady()
             }
 
             override fun onLocationError(message: String) {
                 // Keep quiet on passive updates; explicit taps surface errors directly.
             }
         })
+    }
+
+    private fun updateDetailRouteIfReady() {
+        if (isFinishing || isDestroyed || !isMapStyleLoaded) return
+        val record = currentRecord ?: return
+        val userLoc = latestUserLocation
+            ?: if (locationManager.hasLocationPermission()) {
+                locationManager.getLastKnownLocationSync()?.also { latestUserLocation = it }
+            } else {
+                null
+            }
+            ?: return
+        routeFetcher.fetchRoute(
+            originLat = userLoc.latitude,
+            originLng = userLoc.longitude,
+            destLat = record.latitude,
+            destLng = record.longitude,
+            travelMode = parkingStorage.getNavigationTravelMode()
+        ) { result ->
+            if (isFinishing || isDestroyed || !isMapStyleLoaded) return@fetchRoute
+            ParkingUiHelper.showRouteOnMap(mapLibreMap, isMapStyleLoaded, result.points, result.isRoadRoute)
+            if (!hasAutoFittedInitialRoute && !hasUserInteractedWithMap && result.points.size >= 2) {
+                hasAutoFittedInitialRoute = true
+                val distMeters = DistanceCalculator.calculateDistanceMeters(
+                    userLoc.latitude,
+                    userLoc.longitude,
+                    record.latitude,
+                    record.longitude
+                )
+                if (distMeters in ROUTE_FIT_MIN_METERS..ROUTE_FIT_MAX_METERS) {
+                    val padPx = (ROUTE_FIT_PADDING_DP * resources.displayMetrics.density).toInt()
+                    ParkingUiHelper.fitRouteBounds(mapLibreMap, result.points, padPx)
+                }
+            }
+        }
     }
 
     private fun stopLiveMapLocationUpdates() {
@@ -888,6 +953,9 @@ class ParkingRecordDetailActivity : AppCompatActivity() {
         if (locationManager.hasLocationPermission()) {
             startLiveMapLocationUpdates()
         }
+        if (isMapStyleLoaded) {
+            updateDetailRouteIfReady()
+        }
         currentRecord?.let {
             binding.tvDetailRelativeTime.text = RelativeTimeFormatter.format(it.savedTimestamp)
             if (distanceController.stateFor(it.id) is ParkingUiHelper.RecordDistanceState.Idle &&
@@ -927,6 +995,7 @@ class ParkingRecordDetailActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         stopRelativeTimeTicker()
+        routeFetcher.shutdown()
         distanceController.cancelAndClear(resetStates = false)
         photoManager.shutdown()
         if (mapInitialized) binding.detailMapView.onDestroy()

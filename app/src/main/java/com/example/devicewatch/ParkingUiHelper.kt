@@ -23,27 +23,38 @@ import com.example.devicewatch.location.DistanceCalculator
 import com.example.devicewatch.location.NativeGeocoder
 import com.example.devicewatch.model.ParkingPhotoItem
 import com.example.devicewatch.model.ParkingRecord
+import com.example.devicewatch.navigation.RoutePoint
 import com.example.devicewatch.storage.ParkingPhotoManager
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import org.maplibre.android.camera.CameraUpdateFactory
 import org.maplibre.android.geometry.LatLng
+import org.maplibre.android.geometry.LatLngBounds
 import org.maplibre.android.location.LocationComponentActivationOptions
 import org.maplibre.android.location.modes.CameraMode
 import org.maplibre.android.location.modes.RenderMode
 import org.maplibre.android.maps.MapLibreMap
 import org.maplibre.android.maps.Style
+import org.maplibre.android.style.layers.LineLayer
 import org.maplibre.android.style.layers.Property
 import org.maplibre.android.style.layers.PropertyFactory.iconAllowOverlap
 import org.maplibre.android.style.layers.PropertyFactory.iconAnchor
 import org.maplibre.android.style.layers.PropertyFactory.iconIgnorePlacement
 import org.maplibre.android.style.layers.PropertyFactory.iconImage
+import org.maplibre.android.style.layers.PropertyFactory.lineCap
+import org.maplibre.android.style.layers.PropertyFactory.lineColor
+import org.maplibre.android.style.layers.PropertyFactory.lineDasharray
+import org.maplibre.android.style.layers.PropertyFactory.lineJoin
+import org.maplibre.android.style.layers.PropertyFactory.lineOpacity
+import org.maplibre.android.style.layers.PropertyFactory.lineWidth
+import org.maplibre.android.style.layers.PropertyFactory.visibility
 import org.maplibre.android.style.layers.SymbolLayer
 import org.maplibre.android.style.sources.GeoJsonSource
 import org.maplibre.android.utils.BitmapUtils
 import org.maplibre.geojson.Feature
 import org.maplibre.geojson.FeatureCollection
+import org.maplibre.geojson.LineString
 import org.maplibre.geojson.Point
 import java.text.DateFormat
 import java.util.Date
@@ -55,6 +66,13 @@ internal object ParkingUiHelper {
     private const val MARKER_SOURCE_ID = "parking-spot-source"
     private const val MARKER_LAYER_ID = "parking-spot-layer"
     private const val MARKER_ICON_ID = "parking-spot-pin"
+    private const val ROUTE_SOURCE_ID = "parking-route-source"
+    private const val ROUTE_CASING_LAYER_ID = "parking-route-casing-layer"
+    private const val ROUTE_SOLID_LAYER_ID = "parking-route-solid-layer"
+    private const val ROUTE_DASHED_LAYER_ID = "parking-route-dashed-layer"
+    private const val ROUTE_CASING_COLOR = "#FFFFFF"
+    private const val ROUTE_SOLID_BLUE_COLOR = "#1A73E8"
+    private const val ROUTE_DASHED_BLUE_COLOR = "#2563EB"
     const val PREVIEW_REQ_SIZE = 1440
 
     fun formatCooldownLabel(context: Context, cooldownMs: Long): String {
@@ -95,6 +113,54 @@ internal object ParkingUiHelper {
                 iconIgnorePlacement(true)
             )
             style.addLayer(layer)
+        }
+        ensureRouteLayers(style)
+    }
+
+    private fun ensureRouteLayers(style: Style) {
+        if (style.getSource(ROUTE_SOURCE_ID) == null) {
+            style.addSource(GeoJsonSource(ROUTE_SOURCE_ID))
+        }
+        val addLayer = { layer: LineLayer ->
+            if (style.getLayer(MARKER_LAYER_ID) != null) {
+                style.addLayerBelow(layer, MARKER_LAYER_ID)
+            } else {
+                style.addLayer(layer)
+            }
+        }
+        if (style.getLayer(ROUTE_CASING_LAYER_ID) == null) {
+            val casing = LineLayer(ROUTE_CASING_LAYER_ID, ROUTE_SOURCE_ID).withProperties(
+                lineColor(ROUTE_CASING_COLOR),
+                lineWidth(8.5f),
+                lineCap(Property.LINE_CAP_ROUND),
+                lineJoin(Property.LINE_JOIN_ROUND),
+                lineOpacity(0.92f),
+                visibility(Property.NONE)
+            )
+            addLayer(casing)
+        }
+        if (style.getLayer(ROUTE_SOLID_LAYER_ID) == null) {
+            val solid = LineLayer(ROUTE_SOLID_LAYER_ID, ROUTE_SOURCE_ID).withProperties(
+                lineColor(ROUTE_SOLID_BLUE_COLOR),
+                lineWidth(5.0f),
+                lineCap(Property.LINE_CAP_ROUND),
+                lineJoin(Property.LINE_JOIN_ROUND),
+                lineOpacity(0.95f),
+                visibility(Property.NONE)
+            )
+            addLayer(solid)
+        }
+        if (style.getLayer(ROUTE_DASHED_LAYER_ID) == null) {
+            val dashed = LineLayer(ROUTE_DASHED_LAYER_ID, ROUTE_SOURCE_ID).withProperties(
+                lineColor(ROUTE_DASHED_BLUE_COLOR),
+                lineWidth(4.5f),
+                lineCap(Property.LINE_CAP_ROUND),
+                lineJoin(Property.LINE_JOIN_ROUND),
+                lineDasharray(arrayOf(2.0f, 1.8f)),
+                lineOpacity(0.90f),
+                visibility(Property.NONE)
+            )
+            addLayer(dashed)
         }
     }
 
@@ -170,6 +236,61 @@ internal object ParkingUiHelper {
         if (style.isFullyLoaded) {
             style.getSourceAs<GeoJsonSource>(MARKER_SOURCE_ID)
                 ?.setGeoJson(FeatureCollection.fromFeatures(emptyArray()))
+        }
+    }
+
+    fun showRouteOnMap(
+        map: MapLibreMap?,
+        styleLoaded: Boolean,
+        points: List<RoutePoint>,
+        isRoadRoute: Boolean
+    ) {
+        val style = map?.style ?: return
+        if (!styleLoaded || !style.isFullyLoaded) return
+        if (points.size < 2) {
+            clearRouteFromMap(map)
+            return
+        }
+        val geoPoints = points.map { Point.fromLngLat(it.longitude, it.latitude) }
+        style.getSourceAs<GeoJsonSource>(ROUTE_SOURCE_ID)
+            ?.setGeoJson(Feature.fromGeometry(LineString.fromLngLats(geoPoints)))
+        val roadVisibility = if (isRoadRoute) Property.VISIBLE else Property.NONE
+        val dashedVisibility = if (isRoadRoute) Property.NONE else Property.VISIBLE
+        style.getLayer(ROUTE_CASING_LAYER_ID)?.setProperties(visibility(roadVisibility))
+        style.getLayer(ROUTE_SOLID_LAYER_ID)?.setProperties(visibility(roadVisibility))
+        style.getLayer(ROUTE_DASHED_LAYER_ID)?.setProperties(visibility(dashedVisibility))
+    }
+
+    fun clearRouteFromMap(map: MapLibreMap?) {
+        val style = map?.style ?: return
+        if (!style.isFullyLoaded) return
+        style.getSourceAs<GeoJsonSource>(ROUTE_SOURCE_ID)
+            ?.setGeoJson(FeatureCollection.fromFeatures(emptyArray()))
+        style.getLayer(ROUTE_CASING_LAYER_ID)?.setProperties(visibility(Property.NONE))
+        style.getLayer(ROUTE_SOLID_LAYER_ID)?.setProperties(visibility(Property.NONE))
+        style.getLayer(ROUTE_DASHED_LAYER_ID)?.setProperties(visibility(Property.NONE))
+    }
+
+    fun fitRouteBounds(
+        map: MapLibreMap?,
+        points: List<RoutePoint>,
+        paddingPx: Int
+    ) {
+        if (map == null || points.size < 2) return
+        try {
+            val builder = LatLngBounds.Builder()
+            points.forEach { builder.include(LatLng(it.latitude, it.longitude)) }
+            val bounds = builder.build()
+            map.animateCamera(
+                CameraUpdateFactory.newLatLngBounds(
+                    bounds,
+                    paddingPx,
+                    paddingPx,
+                    paddingPx,
+                    paddingPx
+                )
+            )
+        } catch (_: Throwable) {
         }
     }
 

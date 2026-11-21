@@ -49,15 +49,124 @@
             android:textColor="@color/ps_text_secondary" />
     </com.google.android.material.card.MaterialCardView>
 
-    <!-- Top Floating Overlays: Status Banner, Selection Coordinate Pill, Loading Bar -->
+    <!-- Top Floating Overlays: Place Search, Status Banner, Selection Coordinate Pill, Loading Bar -->
     <LinearLayout
         android:id="@+id/topOverlayContainer"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_gravity="top"
+        android:elevation="8dp"
         android:orientation="vertical"
         android:paddingHorizontal="16dp"
         android:paddingTop="12dp">
+
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/cardPlaceSearchOverlay"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="6dp"
+            android:visibility="gone"
+            app:cardBackgroundColor="@color/ps_card_bg"
+            app:cardCornerRadius="14dp"
+            app:cardElevation="6dp"
+            app:strokeColor="@color/ps_card_stroke"
+            app:strokeWidth="1dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="48dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:paddingHorizontal="4dp">
+
+                    <ImageButton
+                        android:id="@+id/btnPlaceSearchBack"
+                        android:layout_width="40dp"
+                        android:layout_height="40dp"
+                        android:background="?attr/selectableItemBackgroundBorderless"
+                        android:contentDescription="@string/close"
+                        android:padding="9dp"
+                        android:scaleType="centerInside"
+                        android:src="@drawable/ic_arrow_back"
+                        app:tint="@color/ps_text_primary" />
+
+                    <EditText
+                        android:id="@+id/etPlaceSearch"
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="1"
+                        android:background="@null"
+                        android:hint="@string/search_places_hint"
+                        android:imeOptions="actionSearch"
+                        android:inputType="textCapWords"
+                        android:maxLines="1"
+                        android:singleLine="true"
+                        android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
+                        android:textColor="@color/ps_text_primary"
+                        android:textColorHint="@color/ps_text_secondary" />
+
+                    <ProgressBar
+                        android:id="@+id/pbPlaceSearch"
+                        android:layout_width="18dp"
+                        android:layout_height="18dp"
+                        android:layout_marginEnd="6dp"
+                        android:indeterminate="true"
+                        android:visibility="gone" />
+
+                    <ImageButton
+                        android:id="@+id/btnClearPlaceSearch"
+                        android:layout_width="38dp"
+                        android:layout_height="38dp"
+                        android:background="?attr/selectableItemBackgroundBorderless"
+                        android:contentDescription="@string/clear_search"
+                        android:padding="9dp"
+                        android:scaleType="centerInside"
+                        android:src="@drawable/ic_close"
+                        android:visibility="gone"
+                        app:tint="@color/ps_text_secondary" />
+                </LinearLayout>
+
+                <View
+                    android:id="@+id/viewPlaceSearchDivider"
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:background="@color/ps_card_stroke"
+                    android:visibility="gone" />
+
+                <androidx.constraintlayout.widget.ConstraintLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content">
+
+                    <androidx.recyclerview.widget.RecyclerView
+                        android:id="@+id/rvPlaceSearchResults"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:overScrollMode="never"
+                        android:visibility="gone"
+                        app:layout_constrainedHeight="true"
+                        app:layout_constraintBottom_toBottomOf="parent"
+                        app:layout_constraintEnd_toEndOf="parent"
+                        app:layout_constraintHeight_max="264dp"
+                        app:layout_constraintStart_toStartOf="parent"
+                        app:layout_constraintTop_toTopOf="parent" />
+                </androidx.constraintlayout.widget.ConstraintLayout>
+
+                <TextView
+                    android:id="@+id/tvPlaceSearchStatus"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:paddingHorizontal="16dp"
+                    android:paddingVertical="12dp"
+                    android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+                    android:textColor="@color/ps_text_secondary"
+                    android:visibility="gone" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
 
         <com.google.android.material.card.MaterialCardView
             android:id="@+id/cardStatusBanner"
@@ -151,15 +260,39 @@
             app:indicatorColor="@color/ps_primary" />
     </LinearLayout>
 
-    <!-- Right-Side Floating Map Controls (+ / - / My Location / Pin Drop) -->
+    <!-- Right-Side Floating Map Controls (Search / + / - / My Location / Pin Drop / QR) -->
     <LinearLayout
         android:id="@+id/mapControlsContainer"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="end|top"
-        android:layout_marginTop="88dp"
+        android:layout_marginTop="56dp"
         android:layout_marginEnd="14dp"
         android:orientation="vertical">
+
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/cardPlaceSearchControl"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:layout_gravity="end"
+            android:layout_marginBottom="10dp"
+            app:cardBackgroundColor="@color/ps_card_bg"
+            app:cardCornerRadius="12dp"
+            app:cardElevation="2dp"
+            app:strokeColor="@color/ps_card_stroke"
+            app:strokeWidth="1dp">
+
+            <ImageButton
+                android:id="@+id/btnPlaceSearch"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/search_places"
+                android:padding="10dp"
+                android:scaleType="centerInside"
+                android:src="@drawable/ic_search"
+                app:tint="@color/ps_text_primary" />
+        </com.google.android.material.card.MaterialCardView>
 
         <com.google.android.material.card.MaterialCardView
             android:layout_width="44dp"

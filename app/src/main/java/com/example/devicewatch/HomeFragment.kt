@@ -2,6 +2,7 @@ package com.example.devicewatch
 
 import android.Manifest
 import android.app.Activity
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.location.Location
@@ -11,13 +12,18 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
+import android.text.Editable
+import android.text.TextWatcher
 import android.view.HapticFeedbackConstants
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.Toast
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -31,8 +37,11 @@ import com.example.devicewatch.location.DistanceCalculator
 import com.example.devicewatch.location.NativeGeocoder
 import com.example.devicewatch.location.ParkingLocationManager
 import com.example.devicewatch.location.ParkingQrParser
+import com.example.devicewatch.location.PlaceSearchClient
+import com.example.devicewatch.location.PlaceSearchResult
 import com.example.devicewatch.model.ParkingPhotoItem
 import com.example.devicewatch.model.ParkingRecord
+import com.example.devicewatch.navigation.RouteFetcher
 import com.example.devicewatch.storage.ParkingPhotoManager
 import com.example.devicewatch.storage.ParkingStorage
 import com.google.android.gms.common.api.ResolvableApiException
@@ -62,6 +71,8 @@ class HomeFragment : Fragment() {
 
     companion object {
         private const val ELAPSED_REFRESH_MS = 30_000L
+        private const val PLACE_SEARCH_DEBOUNCE_MS = 350L
+        private const val INSTANT_JUMP_DISTANCE_METERS = 50_000.0
         private const val FALLBACK_LAT = 0.0
         private const val FALLBACK_LNG = 0.0
         private const val KEY_PENDING_PHOTOS_JSON = "key_pending_photos_json"
@@ -93,6 +104,25 @@ class HomeFragment : Fragment() {
     private var isMapStyleLoaded = false
     private var activeRecord: ParkingRecord? = null
     private var latestUserLocation: Location? = null
+    private var routeFetcher: RouteFetcher? = null
+    private var placeSearchClient: PlaceSearchClient? = null
+    private lateinit var placeSearchAdapter: PlaceSearchAdapter
+    private var isPlaceSearchOpen = false
+    private var pendingPlaceSearchRunnable: Runnable? = null
+
+    private val placeSearchBackCallback = object : OnBackPressedCallback(false) {
+        override fun handleOnBackPressed() {
+            closePlaceSearchOverlay(hideKeyboard = true)
+        }
+    }
+
+    private fun getOrCreateRouteFetcher(): RouteFetcher {
+        return routeFetcher ?: RouteFetcher().also { routeFetcher = it }
+    }
+
+    private fun getOrCreatePlaceSearchClient(): PlaceSearchClient {
+        return placeSearchClient ?: PlaceSearchClient(requireContext()).also { placeSearchClient = it }
+    }
     private var pendingAction = PendingPermissionAction.NONE
     private var pendingCameraAction = PendingCameraAction.PHOTO
     private var pendingShakeConfirmation = false
@@ -321,6 +351,7 @@ class HomeFragment : Fragment() {
         setupPhotoAdapters()
         setupMapView(savedInstanceState)
         setupClickListeners()
+        setupPlaceSearch()
 
         activeRecord = parkingStorage.getActiveRecord()
         if (draftLatLng == null && activeRecord != null) {
@@ -456,6 +487,7 @@ class HomeFragment : Fragment() {
                     } else if (locationManager.hasLocationPermission()) {
                         centerMapOnUserLocation(silent = true)
                     }
+                    updateHomeRouteIfReady()
                 }
                 map.addOnCameraMoveListener {
                     if (isPinSelectionMode && _binding != null) {
@@ -488,11 +520,18 @@ class HomeFragment : Fragment() {
     private fun setupClickListeners() {
         binding.btnZoomIn.setOnClickListener { ParkingUiHelper.zoomIn(mapLibreMap) }
         binding.btnZoomOut.setOnClickListener { ParkingUiHelper.zoomOut(mapLibreMap) }
-        binding.btnMyLocation.setOnClickListener { onMyLocationClicked() }
+        binding.btnMyLocation.setOnClickListener {
+            closePlaceSearchOverlay(hideKeyboard = true)
+            onMyLocationClicked()
+        }
         binding.btnManualPinMode.setOnClickListener {
+            closePlaceSearchOverlay(hideKeyboard = true)
             if (isPinSelectionMode) exitPinSelectionMode() else enterPinSelectionMode()
         }
-        binding.btnScanQr.setOnClickListener { launchQrScannerFlow() }
+        binding.btnScanQr.setOnClickListener {
+            closePlaceSearchOverlay(hideKeyboard = true)
+            launchQrScannerFlow()
+        }
 
         binding.btnHomeSaveNewSpot.setOnClickListener {
             saveHomeForm()
@@ -513,6 +552,250 @@ class HomeFragment : Fragment() {
             showPhotoSourceDialog(forPending = true)
         }
         binding.btnHomeClearAll.setOnClickListener { confirmClearHomeForm() }
+    }
+
+    private fun setupPlaceSearch() {
+        requireActivity().onBackPressedDispatcher.addCallback(
+            viewLifecycleOwner,
+            placeSearchBackCallback
+        )
+        placeSearchAdapter = PlaceSearchAdapter { place ->
+            onPlaceSearchResultSelected(place)
+        }
+        binding.rvPlaceSearchResults.layoutManager = LinearLayoutManager(requireContext())
+        binding.rvPlaceSearchResults.adapter = placeSearchAdapter
+
+        binding.btnPlaceSearch.setOnClickListener {
+            if (isPlaceSearchOpen) {
+                closePlaceSearchOverlay(hideKeyboard = true)
+            } else {
+                openPlaceSearchOverlay()
+            }
+        }
+        binding.btnPlaceSearchBack.setOnClickListener {
+            closePlaceSearchOverlay(hideKeyboard = true)
+        }
+        binding.btnClearPlaceSearch.setOnClickListener {
+            pendingPlaceSearchRunnable?.let { elapsedHandler.removeCallbacks(it) }
+            pendingPlaceSearchRunnable = null
+            placeSearchClient?.cancelPending()
+            binding.etPlaceSearch.setText("")
+            hidePlaceSearchDropdown()
+            binding.etPlaceSearch.requestFocus()
+        }
+
+        binding.etPlaceSearch.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
+
+            override fun afterTextChanged(s: Editable?) {
+                val raw = s?.toString().orEmpty()
+                binding.btnClearPlaceSearch.visibility =
+                    if (raw.isNotEmpty()) View.VISIBLE else View.GONE
+                pendingPlaceSearchRunnable?.let { elapsedHandler.removeCallbacks(it) }
+                pendingPlaceSearchRunnable = null
+
+                if (raw.trim().length < 2) {
+                    placeSearchClient?.cancelPending()
+                    hidePlaceSearchDropdown()
+                    return
+                }
+                if (PlaceSearchClient.isDirectCoordinateOrLink(raw)) {
+                    executePlaceSearch(raw)
+                    return
+                }
+                val instantLocal = PlaceSearchClient.searchLocalRecords(
+                    rawQuery = raw,
+                    records = collectLocalSearchRecords(),
+                    savedSubtitlePrefix = getString(R.string.search_places_saved_prefix),
+                    historySubtitlePrefix = getString(R.string.search_places_history_prefix)
+                )
+                if (instantLocal.isNotEmpty()) {
+                    placeSearchAdapter.submitResults(instantLocal)
+                    binding.viewPlaceSearchDivider.visibility = View.VISIBLE
+                    binding.rvPlaceSearchResults.visibility = View.VISIBLE
+                    binding.tvPlaceSearchStatus.visibility = View.GONE
+                    binding.pbPlaceSearch.visibility = View.VISIBLE
+                }
+                val task = Runnable { executePlaceSearch(raw) }
+                pendingPlaceSearchRunnable = task
+                elapsedHandler.postDelayed(task, PLACE_SEARCH_DEBOUNCE_MS)
+            }
+        })
+
+        binding.etPlaceSearch.setOnEditorActionListener { _, actionId, event ->
+            val isSearchAction = actionId == EditorInfo.IME_ACTION_SEARCH ||
+                actionId == EditorInfo.IME_ACTION_DONE ||
+                (event != null &&
+                    event.keyCode == android.view.KeyEvent.KEYCODE_ENTER &&
+                    event.action == android.view.KeyEvent.ACTION_DOWN)
+            if (isSearchAction) {
+                pendingPlaceSearchRunnable?.let { elapsedHandler.removeCallbacks(it) }
+                pendingPlaceSearchRunnable = null
+                executePlaceSearch(binding.etPlaceSearch.text?.toString().orEmpty())
+                val imm = context?.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+                imm?.hideSoftInputFromWindow(binding.etPlaceSearch.windowToken, 0)
+                true
+            } else {
+                false
+            }
+        }
+    }
+
+    private fun openPlaceSearchOverlay() {
+        if (!isAdded || _binding == null) return
+        isPlaceSearchOpen = true
+        placeSearchBackCallback.isEnabled = true
+        binding.cardPlaceSearchOverlay.visibility = View.VISIBLE
+        binding.cardPinCoordsPill.visibility = View.GONE
+        binding.cardPlaceSearchControl.setCardBackgroundColor(
+            ContextCompat.getColor(requireContext(), R.color.ps_primary_container)
+        )
+        binding.etPlaceSearch.requestFocus()
+        val existingLen = binding.etPlaceSearch.text?.length ?: 0
+        if (existingLen > 0) {
+            binding.etPlaceSearch.selectAll()
+        }
+        binding.etPlaceSearch.post {
+            if (_binding == null || !isAdded || !isPlaceSearchOpen) return@post
+            val imm = context?.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+            imm?.showSoftInput(binding.etPlaceSearch, InputMethodManager.SHOW_IMPLICIT)
+        }
+    }
+
+    private fun closePlaceSearchOverlay(hideKeyboard: Boolean) {
+        pendingPlaceSearchRunnable?.let { elapsedHandler.removeCallbacks(it) }
+        pendingPlaceSearchRunnable = null
+        placeSearchClient?.cancelPending()
+        placeSearchBackCallback.isEnabled = false
+        if (!isPlaceSearchOpen && _binding?.cardPlaceSearchOverlay?.visibility != View.VISIBLE) {
+            return
+        }
+        isPlaceSearchOpen = false
+        _binding?.let { b ->
+            b.cardPlaceSearchOverlay.visibility = View.GONE
+            b.pbPlaceSearch.visibility = View.GONE
+            b.viewPlaceSearchDivider.visibility = View.GONE
+            b.rvPlaceSearchResults.visibility = View.GONE
+            b.tvPlaceSearchStatus.visibility = View.GONE
+            context?.let { ctx ->
+                b.cardPlaceSearchControl.setCardBackgroundColor(
+                    ContextCompat.getColor(ctx, R.color.ps_card_bg)
+                )
+            }
+            if (isPinSelectionMode) {
+                b.cardPinCoordsPill.visibility = View.VISIBLE
+            }
+            if (hideKeyboard) {
+                b.etPlaceSearch.clearFocus()
+                val imm = context?.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+                imm?.hideSoftInputFromWindow(b.etPlaceSearch.windowToken, 0)
+            }
+        }
+    }
+
+    private fun hidePlaceSearchDropdown() {
+        _binding?.let { b ->
+            b.pbPlaceSearch.visibility = View.GONE
+            b.viewPlaceSearchDivider.visibility = View.GONE
+            b.rvPlaceSearchResults.visibility = View.GONE
+            b.tvPlaceSearchStatus.visibility = View.GONE
+        }
+        if (::placeSearchAdapter.isInitialized) {
+            placeSearchAdapter.submitResults(emptyList())
+        }
+    }
+
+    private fun collectLocalSearchRecords(): List<ParkingRecord> {
+        if (!::parkingStorage.isInitialized) return emptyList()
+        val combined = ArrayList<ParkingRecord>()
+        val seenIds = HashSet<String>()
+        activeRecord?.let {
+            if (seenIds.add(it.id)) combined.add(it)
+        }
+        parkingStorage.getSavedRecords().forEach {
+            if (seenIds.add(it.id)) combined.add(it)
+        }
+        parkingStorage.getHistoryRecords().forEach {
+            if (seenIds.add(it.id)) combined.add(it)
+        }
+        return combined
+    }
+
+    private fun executePlaceSearch(rawQuery: String) {
+        if (!isAdded || _binding == null || !isPlaceSearchOpen) return
+        val query = rawQuery.trim()
+        if (query.length < 2) {
+            hidePlaceSearchDropdown()
+            return
+        }
+        val bias = latestUserLocation?.let { LatLng(it.latitude, it.longitude) }
+            ?: mapLibreMap?.cameraPosition?.target
+        binding.pbPlaceSearch.visibility = View.VISIBLE
+        getOrCreatePlaceSearchClient().search(
+            rawQuery = query,
+            coordSubtitle = getString(R.string.search_places_coordinates_subtitle),
+            swapSubtitle = getString(R.string.search_places_swap_subtitle),
+            savedSubtitlePrefix = getString(R.string.search_places_saved_prefix),
+            historySubtitlePrefix = getString(R.string.search_places_history_prefix),
+            localRecords = collectLocalSearchRecords(),
+            biasLat = bias?.latitude,
+            biasLng = bias?.longitude
+        ) { outcome ->
+            if (!isAdded || _binding == null || !isPlaceSearchOpen) return@search
+            binding.pbPlaceSearch.visibility = if (outcome.isPendingEnrichment) View.VISIBLE else View.GONE
+            if (outcome.results.isNotEmpty()) {
+                placeSearchAdapter.submitResults(outcome.results)
+                binding.viewPlaceSearchDivider.visibility = View.VISIBLE
+                binding.rvPlaceSearchResults.visibility = View.VISIBLE
+                binding.tvPlaceSearchStatus.visibility = View.GONE
+            } else {
+                placeSearchAdapter.submitResults(emptyList())
+                binding.viewPlaceSearchDivider.visibility = View.VISIBLE
+                binding.rvPlaceSearchResults.visibility = View.GONE
+                binding.tvPlaceSearchStatus.setText(
+                    if (outcome.hadNetworkError) R.string.search_places_error else R.string.search_places_empty
+                )
+                binding.tvPlaceSearchStatus.visibility = View.VISIBLE
+            }
+        }
+    }
+
+    private fun onPlaceSearchResultSelected(place: PlaceSearchResult) {
+        closePlaceSearchOverlay(hideKeyboard = true)
+        val target = LatLng(place.latitude, place.longitude)
+        val currentCenter = mapLibreMap?.cameraPosition?.target
+        val jumpMeters = if (currentCenter != null) {
+            RouteFetcher.haversineMeters(
+                currentCenter.latitude,
+                currentCenter.longitude,
+                target.latitude,
+                target.longitude
+            )
+        } else {
+            Double.MAX_VALUE
+        }
+        val update = CameraUpdateFactory.newLatLngZoom(target, place.suggestedZoom)
+        if (jumpMeters > INSTANT_JUMP_DISTANCE_METERS) {
+            mapLibreMap?.moveCamera(update)
+        } else {
+            mapLibreMap?.animateCamera(update)
+        }
+        if (!isPinSelectionMode) {
+            enterPinSelectionMode(
+                initialTargetOverride = target,
+                initialLabelOverride = place.savedLabel
+            )
+        } else {
+            selectedManualLatLng = target
+            val formatted = NativeGeocoder.formatCoordinates(target.latitude, target.longitude)
+            binding.tvTopSelectedCoords.text = formatted
+            binding.tvPinSelectCoords.text = formatted
+            if (place.savedLabel != null) {
+                binding.etPinPlaceLabel.setText(place.savedLabel)
+            }
+        }
     }
 
     fun triggerSaveFromShake(): Boolean {
@@ -588,6 +871,8 @@ class HomeFragment : Fragment() {
                     if (formTimestamp <= 0L) formTimestamp = System.currentTimeMillis()
                     renderSheetState(focusMap = true)
                     resolveFormAddressAsync(location.latitude, location.longitude)
+                } else {
+                    updateHomeRouteIfReady()
                 }
             }
 
@@ -639,6 +924,7 @@ class HomeFragment : Fragment() {
                     )
                 )
                 applyAutoDefaultLocationIfNeeded(location)
+                updateHomeRouteIfReady()
             }
 
             override fun onLocationError(message: String) {
@@ -648,8 +934,13 @@ class HomeFragment : Fragment() {
         })
     }
 
-    private fun enterPinSelectionMode() {
+    private fun enterPinSelectionMode(
+        initialTargetOverride: LatLng? = null,
+        initialLabelOverride: String? = null
+    ) {
         isPinSelectionMode = true
+        routeFetcher?.reset()
+        ParkingUiHelper.clearRouteFromMap(mapLibreMap)
         hideBanner()
         binding.ivCenterCrosshair.visibility = View.VISIBLE
         binding.cardPinCoordsPill.visibility = View.VISIBLE
@@ -659,7 +950,8 @@ class HomeFragment : Fragment() {
             ContextCompat.getColor(requireContext(), R.color.ps_primary_container)
         )
 
-        val initialTarget = draftLatLng
+        val initialTarget = initialTargetOverride
+            ?: draftLatLng
             ?: mapLibreMap?.cameraPosition?.target
             ?: activeRecord?.let { LatLng(it.latitude, it.longitude) }
             ?: latestUserLocation?.let { LatLng(it.latitude, it.longitude) }
@@ -669,7 +961,11 @@ class HomeFragment : Fragment() {
         val formatted = NativeGeocoder.formatCoordinates(initialTarget.latitude, initialTarget.longitude)
         binding.tvTopSelectedCoords.text = formatted
         binding.tvPinSelectCoords.text = formatted
-        binding.etPinPlaceLabel.setText(draftPlaceLabel.orEmpty())
+        if (initialTargetOverride != null) {
+            binding.etPinPlaceLabel.setText(initialLabelOverride.orEmpty())
+        } else {
+            binding.etPinPlaceLabel.setText(draftPlaceLabel.orEmpty())
+        }
 
         bottomSheetBehavior.isDraggable = false
         bottomSheetBehavior.state = BottomSheetBehavior.STATE_EXPANDED
@@ -1067,6 +1363,7 @@ class HomeFragment : Fragment() {
         } else {
             ParkingUiHelper.clearMapMarker(mapLibreMap)
         }
+        updateHomeRouteIfReady()
     }
 
     private fun renderFormPhotoState() {
@@ -1497,6 +1794,8 @@ class HomeFragment : Fragment() {
         clearPendingPhotos()
         parkingStorage.clearActiveSpot()
         activeRecord = null
+        routeFetcher?.reset()
+        ParkingUiHelper.clearRouteFromMap(mapLibreMap)
         formTimestamp = System.currentTimeMillis()
         isFormSavedToSaved = false
         hasUnsavedFormChanges = false
@@ -1540,6 +1839,7 @@ class HomeFragment : Fragment() {
                 latestUserLocation = location
                 ParkingUiHelper.updateUserLocationPuck(mapLibreMap, location)
                 applyAutoDefaultLocationIfNeeded(location)
+                updateHomeRouteIfReady()
             }
 
             override fun onLocationError(message: String) {
@@ -1549,6 +1849,45 @@ class HomeFragment : Fragment() {
                 }
             }
         })
+    }
+
+    private fun updateHomeRouteIfReady() {
+        if (!isAdded || _binding == null || !isMapStyleLoaded || !::parkingStorage.isInitialized) return
+        if (isPinSelectionMode) {
+            routeFetcher?.reset()
+            ParkingUiHelper.clearRouteFromMap(mapLibreMap)
+            return
+        }
+        val destination: LatLng? = when {
+            activeRecord != null -> draftLatLng ?: LatLng(activeRecord!!.latitude, activeRecord!!.longitude)
+            draftLatLng != null && !isAutoDefaultGpsLocation -> draftLatLng
+            else -> null
+        }
+        if (destination == null) {
+            routeFetcher?.reset()
+            ParkingUiHelper.clearRouteFromMap(mapLibreMap)
+            return
+        }
+        val userLoc = latestUserLocation
+            ?: if (::locationManager.isInitialized && locationManager.hasLocationPermission()) {
+                locationManager.getLastKnownLocationSync()?.also { latestUserLocation = it }
+            } else {
+                null
+            }
+        if (userLoc == null) {
+            ParkingUiHelper.clearRouteFromMap(mapLibreMap)
+            return
+        }
+        getOrCreateRouteFetcher().fetchRoute(
+            originLat = userLoc.latitude,
+            originLng = userLoc.longitude,
+            destLat = destination.latitude,
+            destLng = destination.longitude,
+            travelMode = parkingStorage.getNavigationTravelMode()
+        ) { result ->
+            if (!isAdded || _binding == null || !isMapStyleLoaded || isPinSelectionMode) return@fetchRoute
+            ParkingUiHelper.showRouteOnMap(mapLibreMap, isMapStyleLoaded, result.points, result.isRoadRoute)
+        }
     }
 
     private fun stopLiveDistanceUpdates() {
@@ -1632,6 +1971,7 @@ class HomeFragment : Fragment() {
         super.onHiddenChanged(hidden)
         if (_binding == null || !::locationManager.isInitialized) return
         if (hidden) {
+            closePlaceSearchOverlay(hideKeyboard = true)
             stopLiveDistanceUpdates()
             stopElapsedTimer()
         } else {
@@ -1673,6 +2013,7 @@ class HomeFragment : Fragment() {
     }
 
     override fun onPause() {
+        closePlaceSearchOverlay(hideKeyboard = false)
         mapView?.onPause()
         super.onPause()
     }
@@ -1718,6 +2059,13 @@ class HomeFragment : Fragment() {
             locationManager.cancelCurrentLocationRequest()
         }
         stopElapsedTimer()
+        pendingPlaceSearchRunnable?.let { elapsedHandler.removeCallbacks(it) }
+        pendingPlaceSearchRunnable = null
+        placeSearchBackCallback.isEnabled = false
+        placeSearchClient?.shutdown()
+        placeSearchClient = null
+        routeFetcher?.shutdown()
+        routeFetcher = null
         if (::nativeGeocoder.isInitialized) {
             nativeGeocoder.shutdown()
         }
