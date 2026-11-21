@@ -129,6 +129,25 @@ class SettingsFragment : Fragment() {
             }
         }
 
+        binding.toggleWidgetBrowseMode.addOnButtonCheckedListener { _, checkedId, isChecked ->
+            if (isUpdatingControls || !isChecked) return@addOnButtonCheckedListener
+            val nextMode = if (checkedId == R.id.btnWidgetBrowseSaved) {
+                ParkingStorage.WIDGET_BROWSE_MODE_SAVED
+            } else {
+                ParkingStorage.WIDGET_BROWSE_MODE_HISTORY
+            }
+            updateWidgetBrowseDescription(nextMode)
+            if (parkingStorage.getWidgetBrowseMode() != nextMode) {
+                parkingStorage.setWidgetBrowseMode(nextMode)
+                com.example.devicewatch.widget.ParkingSpotWidgetProvider.onWidgetBrowseModeChanged(requireContext())
+            }
+        }
+
+        binding.switchSettingsWidgetAutoSave.setOnCheckedChangeListener { _, isChecked ->
+            if (isUpdatingControls) return@setOnCheckedChangeListener
+            parkingStorage.setWidgetAutoBookmarkEnabled(isChecked)
+        }
+
         binding.switchSettingsShake.setOnCheckedChangeListener { _, isChecked ->
             if (isUpdatingControls) return@setOnCheckedChangeListener
             parkingStorage.setShakeToSaveEnabled(isChecked)
@@ -274,6 +293,16 @@ class SettingsFragment : Fragment() {
             binding.toggleWidgetRouteMode.check(widgetRouteButtonId)
             updateWidgetRouteDescription(widgetRouteMode)
 
+            val widgetBrowseMode = parkingStorage.getWidgetBrowseMode()
+            val widgetBrowseButtonId = if (widgetBrowseMode == ParkingStorage.WIDGET_BROWSE_MODE_SAVED) {
+                R.id.btnWidgetBrowseSaved
+            } else {
+                R.id.btnWidgetBrowseHistory
+            }
+            binding.toggleWidgetBrowseMode.check(widgetBrowseButtonId)
+            updateWidgetBrowseDescription(widgetBrowseMode)
+            binding.switchSettingsWidgetAutoSave.isChecked = parkingStorage.isWidgetAutoBookmarkEnabled()
+
             if (!ShakeDetector.isSensorAvailable(requireContext())) {
                 binding.switchSettingsShake.isChecked = false
                 binding.switchSettingsShake.isEnabled = false
@@ -311,6 +340,16 @@ class SettingsFragment : Fragment() {
                 R.string.widget_route_desc_green
             } else {
                 R.string.widget_route_desc_blue
+            }
+        )
+    }
+
+    private fun updateWidgetBrowseDescription(mode: String) {
+        binding.tvSettingsWidgetBrowseDesc.setText(
+            if (mode == ParkingStorage.WIDGET_BROWSE_MODE_SAVED) {
+                R.string.widget_browse_desc_saved
+            } else {
+                R.string.widget_browse_desc_history
             }
         )
     }

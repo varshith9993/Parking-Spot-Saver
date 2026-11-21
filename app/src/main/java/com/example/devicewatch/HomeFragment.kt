@@ -896,7 +896,8 @@ class HomeFragment : Fragment() {
         if (shouldApplyInitial || shouldRefineCachedDefault) {
             draftLatLng = LatLng(location.latitude, location.longitude)
             draftAddress = null
-            isAutoDefaultGpsLocation = false
+            // Keep refining the default draft pin until a crisp <= 15m GPS fix locks.
+            isAutoDefaultGpsLocation = !(location.hasAccuracy() && location.accuracy <= 15f)
             if (formTimestamp <= 0L) formTimestamp = System.currentTimeMillis()
             renderSheetState(focusMap = true)
             resolveFormAddressAsync(location.latitude, location.longitude)

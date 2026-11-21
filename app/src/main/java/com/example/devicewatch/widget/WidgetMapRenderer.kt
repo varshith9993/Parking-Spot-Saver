@@ -34,6 +34,7 @@ import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.floor
@@ -62,12 +63,15 @@ object WidgetMapRenderer {
     private const val ROUTE_CONNECT_TIMEOUT_MS = 2500
     private const val ROUTE_READ_TIMEOUT_MS = 3000
     private const val OFFLINE_ROUTE_RETRY_MS = 20_000L
+    private const val RENDER_FAILURE_COOLDOWN_MS = 45_000L
+    private const val SNAPSHOT_TIMEOUT_MS = 8_000L
     internal const val NEAR_GREEN_DOTTED_METERS = 25.0
 
     private val mapExecutor = Executors.newSingleThreadExecutor()
     private val mainHandler by lazy { Handler(Looper.getMainLooper()) }
     private val activeSnapshotters = ConcurrentHashMap<String, MapSnapshotter>()
     private val inFlightCallbacks = ConcurrentHashMap<String, CopyOnWriteArrayList<() -> Unit>>()
+    private val recentFailureAtMs = ConcurrentHashMap<String, Long>()
 
     data class MapRenderRequest(
         val parkedLat: Double,
@@ -122,6 +126,12 @@ object WidgetMapRenderer {
         return hasValidUser &&
             routeMode != ParkingStorage.WIDGET_ROUTE_MODE_GREEN_DOTTED &&
             directDistanceMeters >= NEAR_GREEN_DOTTED_METERS
+    }
+
+    fun shouldRenderMap(context: Context, req: MapRenderRequest): Boolean {
+        if (getCachedBitmap(context, req) != null) return false
+        val lastFailAt = recentFailureAtMs[req.cacheKey] ?: return true
+        return (System.currentTimeMillis() - lastFailAt) >= RENDER_FAILURE_COOLDOWN_MS
     }
 
     fun getCachedBitmap(context: Context, req: MapRenderRequest): Bitmap? {
@@ -277,6 +287,18 @@ object WidgetMapRenderer {
         fullKey: String
     ) {
         mainHandler.post {
+            val settled = AtomicBoolean(false)
+            var snapshotterRef: MapSnapshotter? = null
+            val timeoutRunnable = Runnable {
+                if (settled.compareAndSet(false, true)) {
+                    snapshotterRef?.let { activeSnapshotters.remove(req.cacheName, it) }
+                    try {
+                        snapshotterRef?.cancel()
+                    } catch (_: Throwable) {
+                    }
+                    renderOsmRasterFallbackAsync(appCtx, req, routeResult, fullKey)
+                }
+            }
             try {
                 MapLibre.getInstance(appCtx)
                 val logicalW = if (req.isExpanded) EXPANDED_LOGICAL_W else MINI_LOGICAL_DP
@@ -294,34 +316,56 @@ object WidgetMapRenderer {
                     .withPixelRatio(ratio)
                     .withLogo(false)
 
-                activeSnapshotters.remove(req.cacheName)?.cancel()
+                activeSnapshotters.remove(req.cacheName)?.let { prev ->
+                    try {
+                        prev.cancel()
+                    } catch (_: Throwable) {
+                    }
+                }
                 val snapshotter = MapSnapshotter(appCtx, options)
+                snapshotterRef = snapshotter
                 activeSnapshotters[req.cacheName] = snapshotter
+                mainHandler.postDelayed(timeoutRunnable, SNAPSHOT_TIMEOUT_MS)
 
                 snapshotter.start(
                     object : MapSnapshotter.SnapshotReadyCallback {
                         override fun onSnapshotReady(snapshot: MapSnapshot) {
+                            mainHandler.removeCallbacks(timeoutRunnable)
                             activeSnapshotters.remove(req.cacheName, snapshotter)
-                            val styledBitmap = compositePinsAndRoundCorners(appCtx, snapshot, req, routeResult)
+                            if (!settled.compareAndSet(false, true)) return
+                            val styledBitmap = try {
+                                compositePinsAndRoundCorners(appCtx, snapshot, req, routeResult)
+                            } catch (_: Throwable) {
+                                renderOsmRasterFallbackAsync(appCtx, req, routeResult, fullKey)
+                                return
+                            }
                             mapExecutor.execute {
+                                var wrote = false
                                 try {
-                                    writeBitmapToCache(appCtx, req, styledBitmap)
+                                    wrote = writeBitmapToCache(appCtx, req, styledBitmap)
                                 } finally {
-                                    styledBitmap.recycle()
-                                    notifyAndClearCallbacks(fullKey)
+                                    if (!styledBitmap.isRecycled) {
+                                        styledBitmap.recycle()
+                                    }
+                                    notifyAndClearCallbacks(fullKey, wrote)
                                 }
                             }
                         }
                     },
                     object : MapSnapshotter.ErrorHandler {
                         override fun onError(error: String) {
+                            mainHandler.removeCallbacks(timeoutRunnable)
                             activeSnapshotters.remove(req.cacheName, snapshotter)
+                            if (!settled.compareAndSet(false, true)) return
                             renderOsmRasterFallbackAsync(appCtx, req, routeResult, fullKey)
                         }
                     }
                 )
             } catch (_: Throwable) {
-                renderOsmRasterFallbackAsync(appCtx, req, routeResult, fullKey)
+                mainHandler.removeCallbacks(timeoutRunnable)
+                if (settled.compareAndSet(false, true)) {
+                    renderOsmRasterFallbackAsync(appCtx, req, routeResult, fullKey)
+                }
             }
         }
     }
@@ -333,19 +377,27 @@ object WidgetMapRenderer {
         fullKey: String
     ) {
         mapExecutor.execute {
+            var wrote = false
             try {
                 val bmp = renderOsmTilesBitmap(appCtx, req, routeResult)
                 if (bmp != null) {
-                    writeBitmapToCache(appCtx, req, bmp)
-                    bmp.recycle()
+                    wrote = writeBitmapToCache(appCtx, req, bmp)
+                    if (!bmp.isRecycled) {
+                        bmp.recycle()
+                    }
                 }
             } finally {
-                notifyAndClearCallbacks(fullKey)
+                notifyAndClearCallbacks(fullKey, wrote)
             }
         }
     }
 
-    private fun notifyAndClearCallbacks(fullKey: String) {
+    private fun notifyAndClearCallbacks(fullKey: String, succeeded: Boolean) {
+        if (succeeded) {
+            recentFailureAtMs.remove(fullKey)
+        } else {
+            recentFailureAtMs[fullKey] = System.currentTimeMillis()
+        }
         val callbacks = inFlightCallbacks.remove(fullKey) ?: return
         callbacks.forEach { cb ->
             try {
@@ -673,8 +725,8 @@ object WidgetMapRenderer {
         return (w / 2f + dx) to (h / 2f + dy)
     }
 
-    private fun writeBitmapToCache(appCtx: Context, req: MapRenderRequest, bitmap: Bitmap) {
-        try {
+    private fun writeBitmapToCache(appCtx: Context, req: MapRenderRequest, bitmap: Bitmap): Boolean {
+        return try {
             val dir = File(appCtx.cacheDir, CACHE_SUBDIR).apply { if (!exists()) mkdirs() }
             val dest = File(dir, req.fileName)
             val temp = File(dir, "${req.fileName}.tmp")
@@ -682,10 +734,12 @@ object WidgetMapRenderer {
                 bitmap.compress(Bitmap.CompressFormat.PNG, 92, out)
             }
             if (dest.exists()) dest.delete()
-            temp.renameTo(dest)
+            val renamed = temp.renameTo(dest)
 
-            File(dir, "latest_${req.cacheName}.key").writeText(req.cacheKey)
-            File(dir, "latest_${req.cacheName}.path").writeText(dest.absolutePath)
+            if (renamed && dest.exists() && dest.length() > 0L) {
+                File(dir, "latest_${req.cacheName}.key").writeText(req.cacheKey)
+                File(dir, "latest_${req.cacheName}.path").writeText(dest.absolutePath)
+            }
 
             val cachedPngs = dir.listFiles { f -> f.isFile && f.name.endsWith(".png") }
             if (cachedPngs != null && cachedPngs.size > MAX_CACHED_MAP_FILES) {
@@ -693,7 +747,9 @@ object WidgetMapRenderer {
                     .take(cachedPngs.size - MAX_CACHED_MAP_FILES)
                     .forEach { it.delete() }
             }
+            renamed && dest.exists() && dest.length() > 0L
         } catch (_: Exception) {
+            false
         }
     }
 

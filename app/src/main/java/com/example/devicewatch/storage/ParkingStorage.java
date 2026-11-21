@@ -58,6 +58,8 @@ public class ParkingStorage {
     private static final String KEY_WIDGET_MAP_ZOOM = "widget_map_zoom";
     private static final String KEY_WIDGET_MAP_USER_LAT = "widget_map_user_lat";
     private static final String KEY_WIDGET_MAP_USER_LNG = "widget_map_user_lng";
+    private static final String KEY_WIDGET_MAP_USER_ACC = "widget_map_user_acc";
+    private static final String KEY_WIDGET_MAP_USER_TIME_MS = "widget_map_user_time_ms";
     private static final String KEY_WIDGET_MAP_CENTER_USER = "widget_map_center_user";
 
     private static final String KEY_LEGACY_HISTORY_JSON = "history_json";
@@ -72,9 +74,45 @@ public class ParkingStorage {
     private static final String KEY_THEME_MODE = "appearance_theme_mode";
     private static final String KEY_NAV_TRAVEL_MODE = "nav_travel_mode";
     private static final String KEY_WIDGET_ROUTE_MODE = "widget_route_mode";
+    private static final String KEY_WIDGET_BROWSE_MODE = "widget_browse_mode";
+    private static final String KEY_WIDGET_AUTO_BOOKMARK = "widget_auto_bookmark_on_save";
+    private static final String KEY_WIDGET_HISTORY_BROWSE_ID = "widget_history_browse_id";
+    private static final String KEY_WIDGET_SAVED_BROWSE_ID = "widget_saved_browse_id";
 
     public static final String WIDGET_ROUTE_MODE_BLUE_AUTO = "blue_auto";
     public static final String WIDGET_ROUTE_MODE_GREEN_DOTTED = "green_dotted";
+    public static final String WIDGET_BROWSE_MODE_HISTORY = "history";
+    public static final String WIDGET_BROWSE_MODE_SAVED = "saved";
+
+    public static final class WidgetBrowseState {
+        @Nullable
+        public final ParkingRecord record;
+        public final int currentIndex;
+        public final int totalCount;
+        public final boolean canGoPrevious;
+        public final boolean canGoNext;
+        @NonNull
+        public final String browseMode;
+        public final boolean isActiveSpot;
+
+        public WidgetBrowseState(
+                @Nullable ParkingRecord record,
+                int currentIndex,
+                int totalCount,
+                boolean canGoPrevious,
+                boolean canGoNext,
+                @NonNull String browseMode,
+                boolean isActiveSpot
+        ) {
+            this.record = record;
+            this.currentIndex = currentIndex;
+            this.totalCount = totalCount;
+            this.canGoPrevious = canGoPrevious;
+            this.canGoNext = canGoNext;
+            this.browseMode = browseMode;
+            this.isActiveSpot = isActiveSpot;
+        }
+    }
 
     public static final long[] SHAKE_COOLDOWN_OPTIONS_MS = {
             3_000L, 5_000L, 10_000L, 20_000L, 30_000L, 60_000L, 120_000L, 300_000L
@@ -154,19 +192,31 @@ public class ParkingStorage {
 
     public void saveNewActiveRecord(@NonNull ParkingRecord newRecord) {
         db.upsertRecord(newRecord, true);
-        writeActiveRecordToPrefs(newRecord);
+        boolean resetWidgetMapState = WIDGET_BROWSE_MODE_HISTORY.equals(getWidgetBrowseMode())
+                || newRecord.isSaved();
+        writeActiveRecordToPrefs(newRecord, resetWidgetMapState);
+        settingsPrefs.edit().remove(KEY_WIDGET_HISTORY_BROWSE_ID).apply();
+        if (newRecord.isSaved()) {
+            settingsPrefs.edit().remove(KEY_WIDGET_SAVED_BROWSE_ID).apply();
+        }
         ParkingSpotWidgetProvider.updateAllWidgets(appContext);
     }
 
     public void setExistingRecordAsActive(@NonNull ParkingRecord record) {
         db.upsertRecord(record, true);
-        writeActiveRecordToPrefs(record);
+        boolean resetWidgetMapState = WIDGET_BROWSE_MODE_HISTORY.equals(getWidgetBrowseMode())
+                || record.isSaved();
+        writeActiveRecordToPrefs(record, resetWidgetMapState);
+        settingsPrefs.edit().remove(KEY_WIDGET_HISTORY_BROWSE_ID).apply();
+        if (record.isSaved()) {
+            settingsPrefs.edit().remove(KEY_WIDGET_SAVED_BROWSE_ID).apply();
+        }
         ParkingSpotWidgetProvider.updateAllWidgets(appContext);
     }
 
-    private void writeActiveRecordToPrefs(@NonNull ParkingRecord record) {
+    private void writeActiveRecordToPrefs(@NonNull ParkingRecord record, boolean clearWidgetMapState) {
         List<ParkingPhotoItem> photos = record.getPhotos();
-        prefs.edit()
+        SharedPreferences.Editor editor = prefs.edit()
                 .putBoolean(KEY_HAS_SPOT, true)
                 .putString(KEY_ACTIVE_RECORD_ID, record.getId())
                 .putLong(KEY_LATITUDE, Double.doubleToRawLongBits(record.getLatitude()))
@@ -181,15 +231,19 @@ public class ParkingStorage {
                 .putLong(KEY_PHOTO_LATITUDE, Double.doubleToRawLongBits(record.getPhotoLatitude()))
                 .putLong(KEY_PHOTO_LONGITUDE, Double.doubleToRawLongBits(record.getPhotoLongitude()))
                 .putString(KEY_PHOTOS_JSON, ParkingPhotoItem.toJsonString(photos))
-                .putBoolean(KEY_IS_SAVED, record.isSaved())
-                .remove(KEY_WIDGET_DIST_RECORD_ID)
-                .remove(KEY_WIDGET_DIST_TEXT)
-                .remove(KEY_WIDGET_DIST_IS_ROUTE)
-                .remove(KEY_WIDGET_MAP_EXPANDED)
-                .remove(KEY_WIDGET_MAP_CENTER_USER)
-                .remove(KEY_WIDGET_MAP_USER_LAT)
-                .remove(KEY_WIDGET_MAP_USER_LNG)
-                .apply();
+                .putBoolean(KEY_IS_SAVED, record.isSaved());
+        if (clearWidgetMapState) {
+            editor.remove(KEY_WIDGET_DIST_RECORD_ID)
+                    .remove(KEY_WIDGET_DIST_TEXT)
+                    .remove(KEY_WIDGET_DIST_IS_ROUTE)
+                    .remove(KEY_WIDGET_MAP_EXPANDED)
+                    .remove(KEY_WIDGET_MAP_CENTER_USER)
+                    .remove(KEY_WIDGET_MAP_USER_LAT)
+                    .remove(KEY_WIDGET_MAP_USER_LNG)
+                    .remove(KEY_WIDGET_MAP_USER_ACC)
+                    .remove(KEY_WIDGET_MAP_USER_TIME_MS);
+        }
+        editor.apply();
     }
 
     public boolean isWidgetMapExpanded() {
@@ -229,6 +283,21 @@ public class ParkingStorage {
         return prefs.contains(KEY_WIDGET_MAP_USER_LNG)
                 ? Double.longBitsToDouble(prefs.getLong(KEY_WIDGET_MAP_USER_LNG, 0L))
                 : Double.NaN;
+    }
+
+    public float getWidgetMapUserAccuracy() {
+        return prefs.getFloat(KEY_WIDGET_MAP_USER_ACC, 0f);
+    }
+
+    public long getWidgetMapUserTimeMs() {
+        return prefs.getLong(KEY_WIDGET_MAP_USER_TIME_MS, 0L);
+    }
+
+    public void setWidgetMapUserFixMetaQuiet(float accuracyMeters, long timeMs) {
+        prefs.edit()
+                .putFloat(KEY_WIDGET_MAP_USER_ACC, Math.max(0f, accuracyMeters))
+                .putLong(KEY_WIDGET_MAP_USER_TIME_MS, Math.max(0L, timeMs))
+                .apply();
     }
 
     public void saveWidgetDistanceAndUserLocationQuiet(
@@ -360,6 +429,11 @@ public class ParkingStorage {
                 && prefs.contains(KEY_LONGITUDE);
     }
 
+    private boolean isWidgetShowingRecord(@NonNull String recordId) {
+        ParkingRecord displayed = getWidgetDisplayedRecord();
+        return displayed != null && recordId.equals(displayed.getId());
+    }
+
     public void setRecordSaved(@NonNull String recordId, boolean isSaved) {
         ParkingRecord active = getActiveRecord();
         boolean isActive = active != null && active.getId().equals(recordId);
@@ -367,7 +441,17 @@ public class ParkingStorage {
             prefs.edit().putBoolean(KEY_IS_SAVED, isSaved).apply();
         }
         db.setSaved(recordId, isSaved);
-        if (isActive) {
+        String savedBrowseId = settingsPrefs.getString(KEY_WIDGET_SAVED_BROWSE_ID, null);
+        if (!isSaved && recordId.equals(savedBrowseId)) {
+            settingsPrefs.edit().remove(KEY_WIDGET_SAVED_BROWSE_ID).apply();
+        } else if (isSaved && isActive) {
+            settingsPrefs.edit().remove(KEY_WIDGET_SAVED_BROWSE_ID).apply();
+            if (WIDGET_BROWSE_MODE_SAVED.equals(getWidgetBrowseMode())) {
+                resetWidgetMapCenterToSpot();
+            }
+        }
+        if (isActive || WIDGET_BROWSE_MODE_SAVED.equals(getWidgetBrowseMode())
+                || recordId.equals(settingsPrefs.getString(KEY_WIDGET_HISTORY_BROWSE_ID, null))) {
             ParkingSpotWidgetProvider.updateAllWidgets(appContext);
         }
     }
@@ -382,7 +466,7 @@ public class ParkingStorage {
             prefs.edit().putString(KEY_PLACE_LABEL, normalized).apply();
         }
         db.updatePlaceLabel(recordId, normalized);
-        if (isActive) {
+        if (isActive || isWidgetShowingRecord(recordId)) {
             ParkingSpotWidgetProvider.updateAllWidgets(appContext);
         }
     }
@@ -394,17 +478,21 @@ public class ParkingStorage {
             prefs.edit().putString(KEY_ADDRESS, address).apply();
         }
         db.updateAddress(recordId, address);
-        if (isActive) {
+        if (isActive || isWidgetShowingRecord(recordId)) {
             ParkingSpotWidgetProvider.updateAllWidgets(appContext);
         }
     }
 
     public void updateRecordNote(@NonNull String recordId, @Nullable String note) {
         ParkingRecord active = getActiveRecord();
-        if (active != null && active.getId().equals(recordId)) {
+        boolean isActive = active != null && active.getId().equals(recordId);
+        if (isActive) {
             prefs.edit().putString(KEY_NOTE, note).apply();
         }
         db.updateNote(recordId, note);
+        if (isActive || isWidgetShowingRecord(recordId)) {
+            ParkingSpotWidgetProvider.updateAllWidgets(appContext);
+        }
     }
 
     public void updateRecordPhotos(@NonNull String recordId, @NonNull List<ParkingPhotoItem> photos) {
@@ -434,7 +522,7 @@ public class ParkingStorage {
             editor.apply();
         }
         db.updatePhotos(recordId, capped);
-        if (isActive) {
+        if (isActive || isWidgetShowingRecord(recordId)) {
             ParkingSpotWidgetProvider.updateAllWidgets(appContext);
         }
     }
@@ -479,7 +567,28 @@ public class ParkingStorage {
     }
 
     public void clearActiveSpot() {
-        prefs.edit().clear().apply();
+        if (WIDGET_BROWSE_MODE_HISTORY.equals(getWidgetBrowseMode())) {
+            prefs.edit().clear().apply();
+            settingsPrefs.edit().remove(KEY_WIDGET_HISTORY_BROWSE_ID).apply();
+        } else {
+            prefs.edit()
+                    .remove(KEY_HAS_SPOT)
+                    .remove(KEY_ACTIVE_RECORD_ID)
+                    .remove(KEY_LATITUDE)
+                    .remove(KEY_LONGITUDE)
+                    .remove(KEY_PLACE_LABEL)
+                    .remove(KEY_TIMESTAMP)
+                    .remove(KEY_ADDRESS)
+                    .remove(KEY_NOTE)
+                    .remove(KEY_PHOTO_URI)
+                    .remove(KEY_PHOTO_CAPTURED_AT)
+                    .remove(KEY_PHOTO_IMPORTED_AT)
+                    .remove(KEY_PHOTO_LATITUDE)
+                    .remove(KEY_PHOTO_LONGITUDE)
+                    .remove(KEY_PHOTOS_JSON)
+                    .remove(KEY_IS_SAVED)
+                    .apply();
+        }
         ParkingSpotWidgetProvider.updateAllWidgets(appContext);
     }
 
@@ -532,8 +641,15 @@ public class ParkingStorage {
         }
         ParkingRecord active = getActiveRecord();
         ParkingRecord removed = db.removeFromHistory(id);
+        boolean clearedBrowsePointer = false;
+        if (id.equals(settingsPrefs.getString(KEY_WIDGET_HISTORY_BROWSE_ID, null))) {
+            settingsPrefs.edit().remove(KEY_WIDGET_HISTORY_BROWSE_ID).apply();
+            clearedBrowsePointer = true;
+        }
         if (removed != null && !removed.isSaved() && active != null && active.getId().equals(id)) {
             clearActiveSpot();
+        } else if (clearedBrowsePointer || WIDGET_BROWSE_MODE_HISTORY.equals(getWidgetBrowseMode())) {
+            ParkingSpotWidgetProvider.updateAllWidgets(appContext);
         }
         return removed;
     }
@@ -542,14 +658,25 @@ public class ParkingStorage {
     public List<String> clearParkingHistory() {
         legacyHistoryPrefs.edit().clear().apply();
         List<String> deletedPhotos = db.clearHistoryPreservingSaved();
+        settingsPrefs.edit().remove(KEY_WIDGET_HISTORY_BROWSE_ID).apply();
+        if (WIDGET_BROWSE_MODE_HISTORY.equals(getWidgetBrowseMode())) {
+            setWidgetMapExpandedQuiet(false);
+            resetWidgetMapCenterToSpot();
+        }
         ParkingRecord active = getActiveRecord();
         if (active != null && !active.isSaved() && db.getRecordById(active.getId()) == null) {
             clearActiveSpot();
+        } else {
+            ParkingSpotWidgetProvider.updateAllWidgets(appContext);
         }
         return deletedPhotos;
     }
 
     public void clearAllParkingData() {
+        settingsPrefs.edit()
+                .remove(KEY_WIDGET_HISTORY_BROWSE_ID)
+                .remove(KEY_WIDGET_SAVED_BROWSE_ID)
+                .apply();
         clearActiveSpot();
         legacyHistoryPrefs.edit().clear().apply();
         db.deleteAllRecords();
@@ -704,5 +831,223 @@ public class ParkingStorage {
                 ? WIDGET_ROUTE_MODE_GREEN_DOTTED
                 : WIDGET_ROUTE_MODE_BLUE_AUTO;
         settingsPrefs.edit().putString(KEY_WIDGET_ROUTE_MODE, normalized).apply();
+    }
+
+    @NonNull
+    public static String normalizeWidgetBrowseMode(@Nullable String mode) {
+        return WIDGET_BROWSE_MODE_SAVED.equals(mode)
+                ? WIDGET_BROWSE_MODE_SAVED
+                : WIDGET_BROWSE_MODE_HISTORY;
+    }
+
+    @NonNull
+    public String getWidgetBrowseMode() {
+        return normalizeWidgetBrowseMode(
+                settingsPrefs.getString(KEY_WIDGET_BROWSE_MODE, WIDGET_BROWSE_MODE_HISTORY)
+        );
+    }
+
+    public void setWidgetBrowseMode(@NonNull String mode) {
+        settingsPrefs.edit()
+                .putString(KEY_WIDGET_BROWSE_MODE, normalizeWidgetBrowseMode(mode))
+                .apply();
+    }
+
+    public boolean isWidgetAutoBookmarkEnabled() {
+        return settingsPrefs.getBoolean(KEY_WIDGET_AUTO_BOOKMARK, false);
+    }
+
+    public void setWidgetAutoBookmarkEnabled(boolean enabled) {
+        settingsPrefs.edit().putBoolean(KEY_WIDGET_AUTO_BOOKMARK, enabled).apply();
+    }
+
+    public void clearWidgetBrowsePositions() {
+        settingsPrefs.edit()
+                .remove(KEY_WIDGET_HISTORY_BROWSE_ID)
+                .remove(KEY_WIDGET_SAVED_BROWSE_ID)
+                .apply();
+        resetWidgetMapCenterToSpot();
+    }
+
+    @NonNull
+    public WidgetBrowseState getWidgetBrowseState() {
+        String mode = getWidgetBrowseMode();
+        ParkingRecord active = getActiveRecord();
+        List<ParkingRecord> history = getHistoryRecords();
+        List<ParkingRecord> saved = getSavedRecords();
+        String browseKey = WIDGET_BROWSE_MODE_SAVED.equals(mode)
+                ? KEY_WIDGET_SAVED_BROWSE_ID
+                : KEY_WIDGET_HISTORY_BROWSE_ID;
+        String storedId = settingsPrefs.getString(browseKey, null);
+        if (storedId != null && !storedId.isEmpty()) {
+            List<ParkingRecord> candidates = buildWidgetBrowseCandidates(mode, active, history, saved);
+            if (findRecordIndexById(candidates, storedId) < 0) {
+                settingsPrefs.edit().remove(browseKey).apply();
+                storedId = null;
+            }
+        }
+        return resolveWidgetBrowseState(mode, active, history, saved, storedId);
+    }
+
+    @Nullable
+    public ParkingRecord getWidgetDisplayedRecord() {
+        return getWidgetBrowseState().record;
+    }
+
+    @NonNull
+    public WidgetBrowseState stepWidgetBrowse(int delta) {
+        String mode = getWidgetBrowseMode();
+        ParkingRecord active = getActiveRecord();
+        List<ParkingRecord> history = getHistoryRecords();
+        List<ParkingRecord> saved = getSavedRecords();
+        String browseKey = WIDGET_BROWSE_MODE_SAVED.equals(mode)
+                ? KEY_WIDGET_SAVED_BROWSE_ID
+                : KEY_WIDGET_HISTORY_BROWSE_ID;
+        String currentId = settingsPrefs.getString(browseKey, null);
+        String nextId = computeSteppedBrowseRecordId(mode, active, history, saved, currentId, delta);
+        if (nextId != null && !nextId.equals(currentId)) {
+            if (WIDGET_BROWSE_MODE_HISTORY.equals(mode) && active != null && nextId.equals(active.getId())) {
+                settingsPrefs.edit().remove(browseKey).apply();
+            } else {
+                settingsPrefs.edit().putString(browseKey, nextId).apply();
+            }
+            resetWidgetMapCenterToSpot();
+        }
+        return getWidgetBrowseState();
+    }
+
+    @NonNull
+    public static List<ParkingRecord> buildWidgetBrowseCandidates(
+            @NonNull String browseMode,
+            @Nullable ParkingRecord activeRecord,
+            @NonNull List<ParkingRecord> historyRecords,
+            @NonNull List<ParkingRecord> savedRecords
+    ) {
+        if (WIDGET_BROWSE_MODE_SAVED.equals(normalizeWidgetBrowseMode(browseMode))) {
+            return new ArrayList<>(savedRecords);
+        }
+        return new ArrayList<>(historyRecords);
+    }
+
+    private static int findRecordIndexById(@NonNull List<ParkingRecord> records, @Nullable String id) {
+        if (id == null || id.isEmpty()) {
+            return -1;
+        }
+        for (int i = 0; i < records.size(); i++) {
+            if (records.get(i).getId().equals(id)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    @NonNull
+    public static WidgetBrowseState resolveWidgetBrowseState(
+            @Nullable String rawBrowseMode,
+            @Nullable ParkingRecord activeRecord,
+            @NonNull List<ParkingRecord> historyRecords,
+            @NonNull List<ParkingRecord> savedRecords,
+            @Nullable String storedBrowseId
+    ) {
+        String mode = normalizeWidgetBrowseMode(rawBrowseMode);
+        List<ParkingRecord> candidates = buildWidgetBrowseCandidates(mode, activeRecord, historyRecords, savedRecords);
+
+        if (WIDGET_BROWSE_MODE_SAVED.equals(mode)) {
+            if (candidates.isEmpty()) {
+                return new WidgetBrowseState(null, -1, 0, false, false, mode, false);
+            }
+            int idx = findRecordIndexById(candidates, storedBrowseId);
+            if (idx < 0) {
+                idx = 0;
+            }
+            ParkingRecord target = candidates.get(idx);
+            boolean isActive = activeRecord != null && activeRecord.getId().equals(target.getId());
+            return new WidgetBrowseState(
+                    target,
+                    idx,
+                    candidates.size(),
+                    (idx + 1) < candidates.size(),
+                    idx > 0,
+                    mode,
+                    isActive
+            );
+        }
+
+        int idx = findRecordIndexById(candidates, storedBrowseId);
+        if (idx >= 0) {
+            ParkingRecord target = candidates.get(idx);
+            boolean isActive = activeRecord != null && activeRecord.getId().equals(target.getId());
+            return new WidgetBrowseState(
+                    target,
+                    idx,
+                    candidates.size(),
+                    (idx + 1) < candidates.size(),
+                    idx > 0,
+                    mode,
+                    isActive
+            );
+        }
+
+        if (activeRecord != null) {
+            int activeIdx = findRecordIndexById(candidates, activeRecord.getId());
+            if (activeIdx >= 0) {
+                ParkingRecord target = candidates.get(activeIdx);
+                return new WidgetBrowseState(
+                        target,
+                        activeIdx,
+                        candidates.size(),
+                        (activeIdx + 1) < candidates.size(),
+                        activeIdx > 0,
+                        mode,
+                        true
+                );
+            }
+        }
+
+        return new WidgetBrowseState(
+                null,
+                -1,
+                candidates.size(),
+                !candidates.isEmpty(),
+                false,
+                mode,
+                false
+        );
+    }
+
+    @Nullable
+    public static String computeSteppedBrowseRecordId(
+            @Nullable String rawBrowseMode,
+            @Nullable ParkingRecord activeRecord,
+            @NonNull List<ParkingRecord> historyRecords,
+            @NonNull List<ParkingRecord> savedRecords,
+            @Nullable String currentBrowseId,
+            int delta
+    ) {
+        if (delta == 0) {
+            return currentBrowseId;
+        }
+        String mode = normalizeWidgetBrowseMode(rawBrowseMode);
+        List<ParkingRecord> candidates = buildWidgetBrowseCandidates(mode, activeRecord, historyRecords, savedRecords);
+        if (candidates.isEmpty()) {
+            return null;
+        }
+        WidgetBrowseState current = resolveWidgetBrowseState(
+                mode, activeRecord, historyRecords, savedRecords, currentBrowseId
+        );
+        int nextIndex;
+        if (current.record == null) {
+            if (delta > 0) {
+                nextIndex = 0;
+            } else {
+                return currentBrowseId;
+            }
+        } else {
+            nextIndex = current.currentIndex + delta;
+            if (nextIndex < 0 || nextIndex >= candidates.size()) {
+                return currentBrowseId;
+            }
+        }
+        return candidates.get(nextIndex).getId();
     }
 }

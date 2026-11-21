@@ -11,6 +11,7 @@ import java.nio.charset.StandardCharsets
 import java.util.Locale
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.atan2
 import kotlin.math.cos
@@ -410,14 +411,18 @@ internal class RouteFetcher {
 
         val seq = requestSeq.incrementAndGet()
 
-        executor.execute {
-            val result = fetchRouteBlocking(originLat, originLng, destLat, destLng, travelMode)
-            mainHandler.post {
-                if (!isShutDown && requestSeq.get() == seq) {
-                    lastResult = result
-                    onResult(result)
+        if (isShutDown || executor.isShutdown) return
+        try {
+            executor.execute {
+                val result = fetchRouteBlocking(originLat, originLng, destLat, destLng, travelMode)
+                mainHandler.post {
+                    if (!isShutDown && requestSeq.get() == seq) {
+                        lastResult = result
+                        onResult(result)
+                    }
                 }
             }
+        } catch (_: RejectedExecutionException) {
         }
     }
 

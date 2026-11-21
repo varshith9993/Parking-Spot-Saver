@@ -146,6 +146,13 @@
     <string name="widget_route_mode_blue">Blue route</string>
     <string name="widget_route_desc_green">Always shows a straight green dotted line and direct straight-line distance in the widget.</string>
     <string name="widget_route_desc_blue">Shows the blue street route and road distance in the widget (switches to green dotted &amp; direct distance when very close).</string>
+    <string name="widget_browse_pref_title">Widget &lt; &gt; browse source</string>
+    <string name="widget_browse_mode_history">History</string>
+    <string name="widget_browse_mode_saved">Saved</string>
+    <string name="widget_browse_desc_history">Shows your newest saved spot automatically and lets &lt; and &gt; browse back and forth through History.</string>
+    <string name="widget_browse_desc_saved">Always shows your top Saved spot (or the one you selected with &lt; and &gt;), and only updates on new bookmarked spots.</string>
+    <string name="widget_auto_bookmark_title">Bookmark spots saved from widget</string>
+    <string name="widget_auto_bookmark_desc">Automatically mark spots saved via the widget as Saved (off by default).</string>
     <string name="settings_group_data">Data Management</string>
 
     <string name="perm_precise_title">Precise Location</string>
@@ -288,20 +295,25 @@
     <!-- Home Screen Widget -->
     <string name="widget_name">Parking Spot</string>
     <string name="widget_description">Save GPS in one tap right from your home screen, toggle bookmark, scan QR, navigate, or share.</string>
-    <string name="widget_status_ready">READY TO PARK</string>
-    <string name="widget_status_active">PARKED SPOT</string>
+    <string name="widget_status_history">HISTORY</string>
+    <string name="widget_status_saved">SAVED</string>
+    <string name="widget_status_history_paged">HISTORY · %1$d/%2$d</string>
+    <string name="widget_status_saved_paged">SAVED · %1$d/%2$d</string>
     <string name="widget_status_saving">SAVING SPOT…</string>
     <string name="widget_saving_title">Getting GPS location…</string>
     <string name="widget_saving_subtitle">Saving your spot right on the home screen…</string>
     <string name="widget_no_spot_title">No active parking spot</string>
     <string name="widget_no_spot_subtitle">Tap Save Spot to record GPS in-place or Scan QR.</string>
+    <string name="widget_no_saved_title">No bookmarked spots</string>
+    <string name="widget_no_saved_subtitle">Bookmark a spot in the app to show it here, or quick-save below.</string>
     <string name="widget_header_idle_sub">Tap Save GPS anytime</string>
+    <string name="widget_prev_spot_desc">Previous spot</string>
+    <string name="widget_next_spot_desc">Next spot</string>
     <string name="widget_save_spot">Save Spot</string>
     <string name="widget_new_spot">Save New</string>
     <string name="widget_scan_qr">Scan QR</string>
     <string name="widget_navigate">Navigate</string>
     <string name="widget_bookmark_desc">Bookmark spot</string>
-    <string name="widget_clear_desc">Clear active spot</string>
     <string name="widget_minimap_desc">Saved parking location mini-map</string>
     <string name="widget_map_close_desc">Close expanded map</string>
     <string name="widget_map_zoom_in_desc">Zoom in map</string>
@@ -316,7 +328,7 @@
     <string name="widget_distance_away_format">%1$s away</string>
     <string name="widget_distance_route_format">%1$s route</string>
     <string name="widget_saved_toast">Parking spot saved</string>
-    <string name="widget_cleared_toast">Active spot cleared from widget</string>
+    <string name="widget_saved_and_bookmarked_toast">Parking spot saved &amp; bookmarked</string>
     <string name="widget_location_permission_needed">Allow Location permission once so the widget can save GPS.</string>
     <string name="widget_gps_failed_toast">GPS unavailable right now — turn on Location and retry.</string>
 </resources>

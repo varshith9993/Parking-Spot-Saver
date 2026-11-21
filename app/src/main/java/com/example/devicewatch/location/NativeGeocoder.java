@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 
 /**
  * Native reverse geocoding backed by android.location.Geocoder.
@@ -83,37 +84,41 @@ public class NativeGeocoder {
                 }
             });
         } else {
-            if (executor.isShutdown()) {
+            if (isShutDown || executor.isShutdown()) {
                 postFailure(callback, fallback, "Geocoder has been shut down.");
                 return;
             }
-            executor.execute(() -> {
-                if (isShutDown) {
-                    return;
-                }
-                try {
-                    @SuppressWarnings("deprecation")
-                    List<Address> addresses = geocoder.getFromLocation(latitude, longitude, 1);
-                    String formatted = extractBestAddress(addresses);
-                    if (formatted != null) {
-                        postSuccess(callback, formatted);
-                    } else {
-                        postFailure(callback, fallback, "No address found for coordinates.");
+            try {
+                executor.execute(() -> {
+                    if (isShutDown) {
+                        return;
                     }
-                } catch (IOException | IllegalArgumentException e) {
-                    String reason = e.getMessage() != null
-                            ? e.getMessage()
-                            : "Reverse geocoding failed.";
-                    postFailure(callback, fallback, reason);
-                }
-            });
+                    try {
+                        @SuppressWarnings("deprecation")
+                        List<Address> addresses = geocoder.getFromLocation(latitude, longitude, 1);
+                        String formatted = extractBestAddress(addresses);
+                        if (formatted != null) {
+                            postSuccess(callback, formatted);
+                        } else {
+                            postFailure(callback, fallback, "No address found for coordinates.");
+                        }
+                    } catch (IOException | IllegalArgumentException e) {
+                        String reason = e.getMessage() != null
+                                ? e.getMessage()
+                                : "Reverse geocoding failed.";
+                        postFailure(callback, fallback, reason);
+                    }
+                });
+            } catch (RejectedExecutionException e) {
+                postFailure(callback, fallback, "Geocoder has been shut down.");
+            }
         }
     }
 
     public void shutdown() {
         isShutDown = true;
         mainHandler.removeCallbacksAndMessages(null);
-        executor.shutdown();
+        executor.shutdownNow();
     }
 
     @NonNull
@@ -156,7 +161,11 @@ public class NativeGeocoder {
     }
 
     private void postSuccess(@NonNull GeocodeCallback callback, @NonNull String address) {
-        mainHandler.post(() -> callback.onSuccess(address));
+        mainHandler.post(() -> {
+            if (!isShutDown) {
+                callback.onSuccess(address);
+            }
+        });
     }
 
     private void postFailure(
@@ -164,6 +173,10 @@ public class NativeGeocoder {
             @NonNull String fallback,
             @NonNull String reason
     ) {
-        mainHandler.post(() -> callback.onFailure(fallback, reason));
+        mainHandler.post(() -> {
+            if (!isShutDown) {
+                callback.onFailure(fallback, reason);
+            }
+        });
     }
 }

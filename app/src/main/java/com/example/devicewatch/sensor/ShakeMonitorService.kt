@@ -51,6 +51,15 @@ class ShakeMonitorService : Service() {
 
         fun start(context: Context) {
             val appCtx = context.applicationContext
+            val storage = ParkingStorage(appCtx)
+            val locManager = ParkingLocationManager(appCtx)
+            if (!storage.isShakeToSaveEnabled() ||
+                !storage.isBackgroundShakeEnabled() ||
+                !locManager.hasLocationPermission() ||
+                !ShakeDetector.isSensorAvailable(appCtx)
+            ) {
+                return
+            }
             val intent = Intent(appCtx, ShakeMonitorService::class.java).apply {
                 action = ACTION_START
             }
@@ -119,7 +128,7 @@ class ShakeMonitorService : Service() {
         )
         shakeDetector.start()
         refreshForegroundNotification(cooldownMs)
-        return START_STICKY
+        return START_NOT_STICKY
     }
 
     private fun promoteToForeground(): Boolean {

@@ -7,7 +7,7 @@
     android:orientation="vertical"
     android:padding="12dp">
 
-    <!-- Top Header: Pin emblem + status/time stack + Bookmark / Clear / QR tools -->
+    <!-- Top Header: Pin emblem + status/time stack + < > Pager / Bookmark / Clear / QR tools -->
     <LinearLayout
         android:id="@+id/widgetHeaderRow"
         android:layout_width="match_parent"
@@ -17,14 +17,14 @@
 
         <FrameLayout
             android:id="@+id/badgePinIdle"
-            android:layout_width="32dp"
-            android:layout_height="32dp"
+            android:layout_width="30dp"
+            android:layout_height="30dp"
             android:background="@drawable/bg_widget_badge_circle">
 
             <ImageView
                 android:id="@+id/ivWidgetPinIdle"
-                android:layout_width="17dp"
-                android:layout_height="17dp"
+                android:layout_width="16dp"
+                android:layout_height="16dp"
                 android:layout_gravity="center"
                 android:contentDescription="@string/app_name"
                 android:src="@drawable/ic_pin_drop"
@@ -33,15 +33,15 @@
 
         <FrameLayout
             android:id="@+id/badgePinActive"
-            android:layout_width="32dp"
-            android:layout_height="32dp"
+            android:layout_width="30dp"
+            android:layout_height="30dp"
             android:background="@drawable/bg_widget_badge_circle_active"
             android:visibility="gone">
 
             <ImageView
                 android:id="@+id/ivWidgetPinActive"
-                android:layout_width="17dp"
-                android:layout_height="17dp"
+                android:layout_width="16dp"
+                android:layout_height="16dp"
                 android:layout_gravity="center"
                 android:contentDescription="@string/app_name"
                 android:src="@drawable/ic_pin_drop"
@@ -53,7 +53,7 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_marginEnd="6dp"
-            android:layout_marginStart="9dp"
+            android:layout_marginStart="8dp"
             android:layout_weight="1"
             android:orientation="vertical">
 
@@ -62,9 +62,9 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:ellipsize="end"
-                android:letterSpacing="0.07"
+                android:letterSpacing="0.06"
                 android:maxLines="1"
-                android:text="@string/widget_status_ready"
+                android:text="@string/widget_status_history"
                 android:textColor="@color/ps_primary"
                 android:textSize="10sp"
                 android:textStyle="bold" />
@@ -80,19 +80,69 @@
                 android:textSize="11sp" />
         </LinearLayout>
 
+        <LinearLayout
+            android:id="@+id/layoutWidgetBrowsePager"
+            android:layout_width="wrap_content"
+            android:layout_height="30dp"
+            android:layout_marginEnd="4dp"
+            android:background="@drawable/bg_widget_chip_neutral"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:visibility="gone">
+
+            <FrameLayout
+                android:id="@+id/btnWidgetPrevSpot"
+                android:layout_width="30dp"
+                android:layout_height="30dp"
+                android:contentDescription="@string/widget_prev_spot_desc">
+
+                <ImageView
+                    android:id="@+id/ivWidgetPrevSpot"
+                    android:layout_width="25dp"
+                    android:layout_height="25dp"
+                    android:layout_gravity="center"
+                    android:contentDescription="@string/widget_prev_spot_desc"
+                    android:src="@drawable/ic_chevron_left"
+                    android:tint="@color/ps_text_primary" />
+            </FrameLayout>
+
+            <ImageView
+                android:id="@+id/viewWidgetPagerDivider"
+                android:layout_width="1dp"
+                android:layout_height="16dp"
+                android:background="@color/ps_widget_inner_stroke"
+                android:contentDescription="@null" />
+
+            <FrameLayout
+                android:id="@+id/btnWidgetNextSpot"
+                android:layout_width="30dp"
+                android:layout_height="30dp"
+                android:contentDescription="@string/widget_next_spot_desc">
+
+                <ImageView
+                    android:id="@+id/ivWidgetNextSpot"
+                    android:layout_width="25dp"
+                    android:layout_height="25dp"
+                    android:layout_gravity="center"
+                    android:contentDescription="@string/widget_next_spot_desc"
+                    android:src="@drawable/ic_chevron_right"
+                    android:tint="@color/ps_text_primary" />
+            </FrameLayout>
+        </LinearLayout>
+
         <FrameLayout
             android:id="@+id/btnWidgetBookmark"
-            android:layout_width="30dp"
-            android:layout_height="30dp"
-            android:layout_marginEnd="5dp"
+            android:layout_width="28dp"
+            android:layout_height="28dp"
+            android:layout_marginEnd="4dp"
             android:background="@drawable/bg_widget_chip_neutral"
             android:contentDescription="@string/widget_bookmark_desc"
             android:visibility="gone">
 
             <ImageView
                 android:id="@+id/ivWidgetBookmark"
-                android:layout_width="16dp"
-                android:layout_height="16dp"
+                android:layout_width="15dp"
+                android:layout_height="15dp"
                 android:layout_gravity="center"
                 android:contentDescription="@string/widget_bookmark_desc"
                 android:src="@drawable/ic_bookmark_outline"
@@ -100,35 +150,16 @@
         </FrameLayout>
 
         <FrameLayout
-            android:id="@+id/btnWidgetClear"
-            android:layout_width="30dp"
-            android:layout_height="30dp"
-            android:layout_marginEnd="5dp"
-            android:background="@drawable/bg_widget_chip_neutral"
-            android:contentDescription="@string/widget_clear_desc"
-            android:visibility="gone">
-
-            <ImageView
-                android:id="@+id/ivWidgetClear"
-                android:layout_width="15dp"
-                android:layout_height="15dp"
-                android:layout_gravity="center"
-                android:contentDescription="@string/widget_clear_desc"
-                android:src="@drawable/ic_close"
-                android:tint="@color/ps_text_secondary" />
-        </FrameLayout>
-
-        <FrameLayout
             android:id="@+id/btnWidgetQr"
-            android:layout_width="30dp"
-            android:layout_height="30dp"
+            android:layout_width="28dp"
+            android:layout_height="28dp"
             android:background="@drawable/bg_widget_button_tonal"
             android:contentDescription="@string/scan_parking_qr">
 
             <ImageView
                 android:id="@+id/ivWidgetQr"
-                android:layout_width="16dp"
-                android:layout_height="16dp"
+                android:layout_width="15dp"
+                android:layout_height="15dp"
                 android:layout_gravity="center"
                 android:contentDescription="@string/scan_parking_qr"
                 android:src="@drawable/ic_qr_code"
@@ -307,12 +338,12 @@
                     android:id="@+id/tvWidgetDistanceActionHint"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:background="@drawable/bg_widget_chip_light"
+                    android:background="@drawable/bg_widget_action_hint_light"
                     android:maxLines="1"
-                    android:paddingBottom="2dp"
-                    android:paddingEnd="8dp"
-                    android:paddingStart="8dp"
-                    android:paddingTop="2dp"
+                    android:paddingBottom="3dp"
+                    android:paddingEnd="9dp"
+                    android:paddingStart="9dp"
+                    android:paddingTop="3dp"
                     android:text="@string/widget_distance_check_hint"
                     android:textColor="@color/ps_text_secondary"
                     android:textSize="10.5sp"

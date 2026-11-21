@@ -183,6 +183,7 @@ internal object ParkingUiHelper {
         initialLocation: Location?
     ) {
         try {
+            if (!style.isFullyLoaded) return
             val locationComponent = map.locationComponent
             if (!locationComponent.isLocationComponentActivated) {
                 val options = LocationComponentActivationOptions.builder(context, style)
@@ -196,7 +197,7 @@ internal object ParkingUiHelper {
             if (initialLocation != null) {
                 locationComponent.forceLocationUpdate(initialLocation)
             }
-        } catch (_: SecurityException) {
+        } catch (_: Throwable) {
         }
     }
 
@@ -207,7 +208,7 @@ internal object ParkingUiHelper {
             if (locationComponent.isLocationComponentActivated && locationComponent.isLocationComponentEnabled) {
                 locationComponent.forceLocationUpdate(location)
             }
-        } catch (_: SecurityException) {
+        } catch (_: Throwable) {
         }
     }
 
@@ -227,27 +228,33 @@ internal object ParkingUiHelper {
         longitude: Double,
         animateCamera: Boolean = true
     ) {
-        val style = map.style
-        if (styleLoaded && style != null && style.isFullyLoaded) {
-            val point = Point.fromLngLat(longitude, latitude)
-            style.getSourceAs<GeoJsonSource>(MARKER_SOURCE_ID)
-                ?.setGeoJson(FeatureCollection.fromFeature(Feature.fromGeometry(point)))
-        }
-        if (animateCamera) {
-            map.animateCamera(
-                CameraUpdateFactory.newLatLngZoom(
-                    LatLng(latitude, longitude),
-                    MAP_DEFAULT_ZOOM
+        try {
+            val style = map.style
+            if (styleLoaded && style != null && style.isFullyLoaded) {
+                val point = Point.fromLngLat(longitude, latitude)
+                style.getSourceAs<GeoJsonSource>(MARKER_SOURCE_ID)
+                    ?.setGeoJson(FeatureCollection.fromFeature(Feature.fromGeometry(point)))
+            }
+            if (animateCamera) {
+                map.animateCamera(
+                    CameraUpdateFactory.newLatLngZoom(
+                        LatLng(latitude, longitude),
+                        MAP_DEFAULT_ZOOM
+                    )
                 )
-            )
+            }
+        } catch (_: Throwable) {
         }
     }
 
     fun clearMapMarker(map: MapLibreMap?) {
-        val style = map?.style ?: return
-        if (style.isFullyLoaded) {
-            style.getSourceAs<GeoJsonSource>(MARKER_SOURCE_ID)
-                ?.setGeoJson(FeatureCollection.fromFeatures(emptyArray()))
+        try {
+            val style = map?.style ?: return
+            if (style.isFullyLoaded) {
+                style.getSourceAs<GeoJsonSource>(MARKER_SOURCE_ID)
+                    ?.setGeoJson(FeatureCollection.fromFeatures(emptyArray()))
+            }
+        } catch (_: Throwable) {
         }
     }
 
@@ -257,30 +264,36 @@ internal object ParkingUiHelper {
         points: List<RoutePoint>,
         isRoadRoute: Boolean
     ) {
-        val style = map?.style ?: return
-        if (!styleLoaded || !style.isFullyLoaded) return
-        if (points.size < 2) {
-            clearRouteFromMap(map)
-            return
+        try {
+            val style = map?.style ?: return
+            if (!styleLoaded || !style.isFullyLoaded) return
+            if (points.size < 2) {
+                clearRouteFromMap(map)
+                return
+            }
+            val geoPoints = points.map { Point.fromLngLat(it.longitude, it.latitude) }
+            style.getSourceAs<GeoJsonSource>(ROUTE_SOURCE_ID)
+                ?.setGeoJson(Feature.fromGeometry(LineString.fromLngLats(geoPoints)))
+            val roadVisibility = if (isRoadRoute) Property.VISIBLE else Property.NONE
+            val dashedVisibility = if (isRoadRoute) Property.NONE else Property.VISIBLE
+            style.getLayer(ROUTE_CASING_LAYER_ID)?.setProperties(visibility(roadVisibility))
+            style.getLayer(ROUTE_SOLID_LAYER_ID)?.setProperties(visibility(roadVisibility))
+            style.getLayer(ROUTE_DASHED_LAYER_ID)?.setProperties(visibility(dashedVisibility))
+        } catch (_: Throwable) {
         }
-        val geoPoints = points.map { Point.fromLngLat(it.longitude, it.latitude) }
-        style.getSourceAs<GeoJsonSource>(ROUTE_SOURCE_ID)
-            ?.setGeoJson(Feature.fromGeometry(LineString.fromLngLats(geoPoints)))
-        val roadVisibility = if (isRoadRoute) Property.VISIBLE else Property.NONE
-        val dashedVisibility = if (isRoadRoute) Property.NONE else Property.VISIBLE
-        style.getLayer(ROUTE_CASING_LAYER_ID)?.setProperties(visibility(roadVisibility))
-        style.getLayer(ROUTE_SOLID_LAYER_ID)?.setProperties(visibility(roadVisibility))
-        style.getLayer(ROUTE_DASHED_LAYER_ID)?.setProperties(visibility(dashedVisibility))
     }
 
     fun clearRouteFromMap(map: MapLibreMap?) {
-        val style = map?.style ?: return
-        if (!style.isFullyLoaded) return
-        style.getSourceAs<GeoJsonSource>(ROUTE_SOURCE_ID)
-            ?.setGeoJson(FeatureCollection.fromFeatures(emptyArray()))
-        style.getLayer(ROUTE_CASING_LAYER_ID)?.setProperties(visibility(Property.NONE))
-        style.getLayer(ROUTE_SOLID_LAYER_ID)?.setProperties(visibility(Property.NONE))
-        style.getLayer(ROUTE_DASHED_LAYER_ID)?.setProperties(visibility(Property.NONE))
+        try {
+            val style = map?.style ?: return
+            if (!style.isFullyLoaded) return
+            style.getSourceAs<GeoJsonSource>(ROUTE_SOURCE_ID)
+                ?.setGeoJson(FeatureCollection.fromFeatures(emptyArray()))
+            style.getLayer(ROUTE_CASING_LAYER_ID)?.setProperties(visibility(Property.NONE))
+            style.getLayer(ROUTE_SOLID_LAYER_ID)?.setProperties(visibility(Property.NONE))
+            style.getLayer(ROUTE_DASHED_LAYER_ID)?.setProperties(visibility(Property.NONE))
+        } catch (_: Throwable) {
+        }
     }
 
     fun fitRouteBounds(

@@ -76,10 +76,6 @@ class ParkingSpotWidgetProvider : AppWidgetProvider() {
             ACTION_SAVE_SPOT -> handleSaveSpotInBackground(appCtx)
             ACTION_SHOW_DISTANCE -> handleShowDistanceInBackground(appCtx, centerExpandedMapOnUser = false)
             ACTION_TOGGLE_BOOKMARK -> handleToggleBookmarkInBackground(appCtx)
-            ACTION_CLEAR_SPOT -> {
-                stopWidgetLocationTracking(appCtx)
-                handleClearSpotInBackground(appCtx)
-            }
             ACTION_OPEN_WIDGET_MAP -> handleOpenOrZoomMap(appCtx, storage, resetToSpot = true, zoomDelta = 0.0)
             ACTION_CLOSE_WIDGET_MAP -> {
                 stopWidgetLocationTracking(appCtx)
@@ -89,16 +85,66 @@ class ParkingSpotWidgetProvider : AppWidgetProvider() {
             ACTION_WIDGET_MAP_ZOOM_OUT -> handleOpenOrZoomMap(appCtx, storage, resetToSpot = false, zoomDelta = -1.0)
             ACTION_WIDGET_MAP_MY_LOCATION -> handleShowDistanceInBackground(appCtx, centerExpandedMapOnUser = true)
             ACTION_WIDGET_MAP_CENTER_PIN -> handleOpenOrZoomMap(appCtx, storage, resetToSpot = true, zoomDelta = 0.0)
+            ACTION_WIDGET_PREV_SPOT -> handleStepBrowseSpot(appCtx, storage, delta = 1)
+            ACTION_WIDGET_NEXT_SPOT -> handleStepBrowseSpot(appCtx, storage, delta = -1)
             ACTION_WIDGET_LOCATION_UPDATE -> handlePassiveWidgetMovementUpdate(appCtx, storage, intent)
         }
+    }
+
+    private fun handleStepBrowseSpot(
+        appCtx: Context,
+        storage: ParkingStorage,
+        delta: Int
+    ) {
+        val prevState = storage.getWidgetBrowseState()
+        val nextState = storage.stepWidgetBrowse(delta)
+        val nextRecord = nextState.record ?: return
+        if (prevState.record != null && prevState.record.id == nextRecord.id) {
+            return
+        }
+
+        val isExpanded = storage.isWidgetMapExpanded()
+        val userPair = seedUserLocationQuietlyIfMissing(appCtx, storage, nextRecord)
+        val hasUser = userPair != null
+        val userLat = userPair?.first ?: Double.NaN
+        val userLng = userPair?.second ?: Double.NaN
+        if (hasUser) {
+            syncWidgetDistanceFromMemory(appCtx, storage, nextRecord, userLat, userLng)
+        }
+        val (centerLat, centerLng) = if (isExpanded) {
+            resolveMapCenter(storage, nextRecord, userLat, userLng, hasUser)
+        } else {
+            nextRecord.latitude to nextRecord.longitude
+        }
+        val zoom = if (isExpanded) storage.getWidgetMapZoom() else 16.0
+        val req = buildMapRenderRequest(
+            storage = storage,
+            record = nextRecord,
+            centerLat = centerLat,
+            centerLng = centerLng,
+            userLat = userLat,
+            userLng = userLng,
+            zoom = zoom,
+            isExpanded = isExpanded,
+            isDark = isDarkModeActive(appCtx, storage)
+        )
+        renderOrShowCachedMap(appCtx, req, showLoadingStatus = isExpanded)
     }
 
     private fun renderOrShowCachedExpandedMap(
         appCtx: Context,
         req: WidgetMapRenderer.MapRenderRequest
     ) {
+        renderOrShowCachedMap(appCtx, req, showLoadingStatus = true)
+    }
+
+    private fun renderOrShowCachedMap(
+        appCtx: Context,
+        req: WidgetMapRenderer.MapRenderRequest,
+        showLoadingStatus: Boolean
+    ) {
         val isCached = WidgetMapRenderer.getCachedBitmap(appCtx, req) != null
-        updateAllWidgets(appCtx, isSaving = false, isMeasuringDistance = !isCached)
+        updateAllWidgets(appCtx, isSaving = false, isMeasuringDistance = showLoadingStatus && !isCached)
         if (isCached) return
 
         val pendingResult = goAsync()
@@ -117,7 +163,7 @@ class ParkingSpotWidgetProvider : AppWidgetProvider() {
 
         WidgetMapRenderer.renderMapAsync(appCtx, req) {
             val freshStorage = ParkingStorage(appCtx)
-            val freshRecord = freshStorage.getActiveRecord()
+            val freshRecord = freshStorage.getWidgetDisplayedRecord()
             if (freshRecord != null && DistanceCalculator.isValidCoordinate(req.userLat, req.userLng)) {
                 syncWidgetDistanceFromMemory(appCtx, freshStorage, freshRecord, req.userLat, req.userLng)
             }
@@ -132,7 +178,7 @@ class ParkingSpotWidgetProvider : AppWidgetProvider() {
         resetToSpot: Boolean,
         zoomDelta: Double
     ) {
-        val record = storage.getActiveRecord() ?: return
+        val record = storage.getWidgetDisplayedRecord() ?: return
         if (resetToSpot) {
             storage.resetWidgetMapCenterToSpot()
             storage.setWidgetMapExpandedQuiet(true)
@@ -170,7 +216,7 @@ class ParkingSpotWidgetProvider : AppWidgetProvider() {
         storage: ParkingStorage,
         intent: Intent
     ) {
-        val record = storage.getActiveRecord()
+        val record = storage.getWidgetDisplayedRecord()
         if (record == null || !storage.isWidgetMapExpanded()) {
             stopWidgetLocationTracking(appCtx)
             return
@@ -180,12 +226,15 @@ class ParkingSpotWidgetProvider : AppWidgetProvider() {
 
         val prevLat = storage.getWidgetMapUserLat()
         val prevLng = storage.getWidgetMapUserLng()
-        if (DistanceCalculator.isValidCoordinate(prevLat, prevLng)) {
-            val movedMeters = DistanceCalculator.calculateDistanceMeters(
-                prevLat, prevLng,
-                location.latitude, location.longitude
+        if (!ParkingLocationManager.shouldAcceptWidgetLocation(
+                prevLat,
+                prevLng,
+                storage.getWidgetMapUserAccuracy(),
+                storage.getWidgetMapUserTimeMs(),
+                location
             )
-            if (movedMeters < 5.0f) return
+        ) {
+            return
         }
 
         val (formatted, isRoadRoute) = computeWidgetDistanceDisplay(
@@ -204,6 +253,7 @@ class ParkingSpotWidgetProvider : AppWidgetProvider() {
             location.longitude,
             keepCenteredOnUser
         )
+        storage.setWidgetMapUserFixMetaQuiet(location.accuracy, location.time)
 
         val (centerLat, centerLng) = resolveMapCenter(
             storage,
@@ -264,6 +314,7 @@ class ParkingSpotWidgetProvider : AppWidgetProvider() {
 
         locationManager.getFastLocation(object : ParkingLocationManager.LocationResultCallback {
             override fun onLocationRetrieved(location: Location) {
+                val markSaved = storage.isWidgetAutoBookmarkEnabled()
                 val record = ParkingRecord(
                     UUID.randomUUID().toString(),
                     location.latitude,
@@ -273,10 +324,13 @@ class ParkingSpotWidgetProvider : AppWidgetProvider() {
                     System.currentTimeMillis(),
                     null,
                     emptyList(),
-                    false
+                    markSaved
                 )
                 storage.saveNewActiveRecord(record)
-                showToast(appCtx, R.string.widget_saved_toast)
+                showToast(
+                    appCtx,
+                    if (markSaved) R.string.widget_saved_and_bookmarked_toast else R.string.widget_saved_toast
+                )
 
                 geocoder.reverseGeocode(
                     record.latitude,
@@ -304,7 +358,7 @@ class ParkingSpotWidgetProvider : AppWidgetProvider() {
 
     private fun handleShowDistanceInBackground(appCtx: Context, centerExpandedMapOnUser: Boolean) {
         val storage = ParkingStorage(appCtx)
-        val active = storage.getActiveRecord() ?: return
+        val active = storage.getWidgetDisplayedRecord() ?: return
         val locationManager = ParkingLocationManager(appCtx)
         if (!locationManager.hasLocationPermission()) {
             showToast(appCtx, R.string.widget_location_permission_needed)
@@ -322,7 +376,7 @@ class ParkingSpotWidgetProvider : AppWidgetProvider() {
             startWidgetLocationTracking(appCtx)
         }
 
-        val syncCached = locationManager.getLastKnownLocationSync()
+        val syncCached = locationManager.getFreshLastKnownLocationSync()
         if (syncCached != null) {
             applyResolvedDistanceLocation(appCtx, storage, active, syncCached, centerExpandedMapOnUser, null)
             return
@@ -394,6 +448,7 @@ class ParkingSpotWidgetProvider : AppWidgetProvider() {
             location.longitude,
             nextCenterOnUser
         )
+        storage.setWidgetMapUserFixMetaQuiet(location.accuracy, location.time)
 
         val isExpandedOrCentering = centerExpandedMapOnUser || storage.isWidgetMapExpanded()
         val (centerLat, centerLng) = if (isExpandedOrCentering) {
@@ -432,7 +487,7 @@ class ParkingSpotWidgetProvider : AppWidgetProvider() {
 
         fun finishAndRefresh() {
             val freshStorage = ParkingStorage(appCtx)
-            val freshRecord = freshStorage.getActiveRecord()
+            val freshRecord = freshStorage.getWidgetDisplayedRecord()
             if (freshRecord != null) {
                 syncWidgetDistanceFromMemory(
                     appCtx,
@@ -487,17 +542,10 @@ class ParkingSpotWidgetProvider : AppWidgetProvider() {
 
     private fun handleToggleBookmarkInBackground(appCtx: Context) {
         val storage = ParkingStorage(appCtx)
-        val active = storage.getActiveRecord() ?: return
-        val nextSaved = !active.isSaved
-        storage.setRecordSaved(active.id, nextSaved)
+        val displayed = storage.getWidgetDisplayedRecord() ?: return
+        val nextSaved = !displayed.isSaved
+        storage.setRecordSaved(displayed.id, nextSaved)
         showToast(appCtx, if (nextSaved) R.string.bookmark_saved else R.string.bookmark_unsaved)
-    }
-
-    private fun handleClearSpotInBackground(appCtx: Context) {
-        val storage = ParkingStorage(appCtx)
-        if (!storage.hasSavedParkingSpot()) return
-        storage.clearActiveSpot()
-        showToast(appCtx, R.string.widget_cleared_toast)
     }
 
     private fun showToast(context: Context, resId: Int) {
@@ -513,13 +561,14 @@ class ParkingSpotWidgetProvider : AppWidgetProvider() {
         private const val ACTION_SAVE_SPOT = "com.example.devicewatch.widget.ACTION_SAVE_SPOT"
         private const val ACTION_SHOW_DISTANCE = "com.example.devicewatch.widget.ACTION_SHOW_DISTANCE"
         private const val ACTION_TOGGLE_BOOKMARK = "com.example.devicewatch.widget.ACTION_TOGGLE_BOOKMARK"
-        private const val ACTION_CLEAR_SPOT = "com.example.devicewatch.widget.ACTION_CLEAR_SPOT"
         private const val ACTION_OPEN_WIDGET_MAP = "com.example.devicewatch.widget.ACTION_OPEN_WIDGET_MAP"
         private const val ACTION_CLOSE_WIDGET_MAP = "com.example.devicewatch.widget.ACTION_CLOSE_WIDGET_MAP"
         private const val ACTION_WIDGET_MAP_ZOOM_IN = "com.example.devicewatch.widget.ACTION_WIDGET_MAP_ZOOM_IN"
         private const val ACTION_WIDGET_MAP_ZOOM_OUT = "com.example.devicewatch.widget.ACTION_WIDGET_MAP_ZOOM_OUT"
         private const val ACTION_WIDGET_MAP_MY_LOCATION = "com.example.devicewatch.widget.ACTION_WIDGET_MAP_MY_LOCATION"
         private const val ACTION_WIDGET_MAP_CENTER_PIN = "com.example.devicewatch.widget.ACTION_WIDGET_MAP_CENTER_PIN"
+        private const val ACTION_WIDGET_PREV_SPOT = "com.example.devicewatch.widget.ACTION_WIDGET_PREV_SPOT"
+        private const val ACTION_WIDGET_NEXT_SPOT = "com.example.devicewatch.widget.ACTION_WIDGET_NEXT_SPOT"
         private const val ACTION_WIDGET_LOCATION_UPDATE = "com.example.devicewatch.widget.ACTION_WIDGET_LOCATION_UPDATE"
 
         private const val ASYNC_GUARD_TIMEOUT_MS = 7_500L
@@ -538,10 +587,24 @@ class ParkingSpotWidgetProvider : AppWidgetProvider() {
         }
 
         @JvmStatic
+        fun onWidgetBrowseModeChanged(context: Context) {
+            val appCtx = context.applicationContext
+            val storage = ParkingStorage(appCtx)
+            storage.clearWidgetBrowsePositions()
+            val record = storage.getWidgetDisplayedRecord()
+            if (record == null) {
+                stopWidgetLocationTracking(appCtx)
+                storage.setWidgetMapExpanded(false)
+                return
+            }
+            onWidgetRoutePreferenceChanged(appCtx)
+        }
+
+        @JvmStatic
         fun onWidgetRoutePreferenceChanged(context: Context) {
             val appCtx = context.applicationContext
             val storage = ParkingStorage(appCtx)
-            val record = storage.getActiveRecord()
+            val record = storage.getWidgetDisplayedRecord()
             if (record == null) {
                 updateAllWidgets(appCtx)
                 return
@@ -596,7 +659,7 @@ class ParkingSpotWidgetProvider : AppWidgetProvider() {
                     readTimeoutMs = PREF_SYNC_READ_TIMEOUT_MS
                 )
                 val freshStorage = ParkingStorage(appCtx)
-                val freshRecord = freshStorage.getActiveRecord() ?: return@execute
+                val freshRecord = freshStorage.getWidgetDisplayedRecord() ?: return@execute
                 syncWidgetDistanceFromMemory(appCtx, freshStorage, freshRecord, userLat, userLng)
                 if (WidgetMapRenderer.getCachedBitmap(appCtx, mapReq) == null) {
                     WidgetMapRenderer.renderMapAsync(appCtx, mapReq) {
@@ -765,7 +828,8 @@ class ParkingSpotWidgetProvider : AppWidgetProvider() {
             isMeasuringDistance: Boolean
         ) {
             val storage = ParkingStorage(context)
-            val record = storage.getActiveRecord()
+            val browseState = storage.getWidgetBrowseState()
+            val record = browseState.record
             val isDark = isDarkModeActive(context, storage)
             val options = appWidgetManager.getAppWidgetOptions(appWidgetId)
             val minHeightDp = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 145)
@@ -817,11 +881,21 @@ class ParkingSpotWidgetProvider : AppWidgetProvider() {
             if (isSaving) {
                 bindSavingState(context, views, isTiny)
             } else if (record == null) {
-                bindEmptyState(context, views, minHeightDp, saveSpotBroadcast, qrPending)
+                bindEmptyState(
+                    context = context,
+                    views = views,
+                    appWidgetId = appWidgetId,
+                    minHeightDp = minHeightDp,
+                    isTiny = isTiny,
+                    browseState = browseState,
+                    saveSpotBroadcast = saveSpotBroadcast,
+                    qrPending = qrPending
+                )
             } else {
                 bindActiveSpotState(
                     context = context,
                     storage = storage,
+                    browseState = browseState,
                     record = record,
                     views = views,
                     appWidgetId = appWidgetId,
@@ -860,15 +934,21 @@ class ParkingSpotWidgetProvider : AppWidgetProvider() {
 
             val tonalBg = if (isDark) R.drawable.bg_widget_tonal_btn_dark else R.drawable.bg_widget_tonal_btn_light
             val chipBg = if (isDark) R.drawable.bg_widget_chip_dark else R.drawable.bg_widget_chip_light
+            val actionHintBg = if (isDark) R.drawable.bg_widget_action_hint_dark else R.drawable.bg_widget_action_hint_light
             val timeChipBg = if (isDark) R.drawable.bg_widget_time_chip_dark else R.drawable.bg_widget_time_chip_light
             val mapCtrlBg = if (isDark) R.drawable.bg_widget_map_ctrl_dark else R.drawable.bg_widget_map_ctrl_light
 
+            views.setInt(R.id.layoutWidgetBrowsePager, "setBackgroundResource", chipBg)
+            views.setInt(
+                R.id.viewWidgetPagerDivider,
+                "setBackgroundColor",
+                Color.parseColor(if (isDark) "#2F363E" else "#DCE7DF")
+            )
             views.setInt(R.id.btnWidgetBookmark, "setBackgroundResource", chipBg)
-            views.setInt(R.id.btnWidgetClear, "setBackgroundResource", chipBg)
             views.setInt(R.id.btnWidgetQr, "setBackgroundResource", tonalBg)
             views.setInt(R.id.tvWidgetCoordsChip, "setBackgroundResource", chipBg)
             views.setInt(R.id.btnWidgetDistance, "setBackgroundResource", tonalBg)
-            views.setInt(R.id.tvWidgetDistanceActionHint, "setBackgroundResource", chipBg)
+            views.setInt(R.id.tvWidgetDistanceActionHint, "setBackgroundResource", actionHintBg)
             views.setInt(R.id.layoutWidgetPhotoBadge, "setBackgroundResource", timeChipBg)
             views.setInt(R.id.btnWidgetUpdateSpot, "setBackgroundResource", tonalBg)
             views.setInt(R.id.btnWidgetShare, "setBackgroundResource", tonalBg)
@@ -908,8 +988,9 @@ class ParkingSpotWidgetProvider : AppWidgetProvider() {
 
             views.setInt(R.id.ivWidgetPinIdle, "setColorFilter", primary)
             views.setInt(R.id.ivWidgetPinActive, "setColorFilter", onPrimary)
+            views.setInt(R.id.ivWidgetPrevSpot, "setColorFilter", textPrimary)
+            views.setInt(R.id.ivWidgetNextSpot, "setColorFilter", textPrimary)
             views.setInt(R.id.ivWidgetBookmark, "setColorFilter", primary)
-            views.setInt(R.id.ivWidgetClear, "setColorFilter", textSecondary)
             views.setInt(R.id.ivWidgetQr, "setColorFilter", primary)
             views.setInt(R.id.ivWidgetPhotoIcon, "setColorFilter", onPrimaryContainer)
             views.setInt(R.id.ivWidgetDistanceIcon, "setColorFilter", primary)
@@ -931,8 +1012,8 @@ class ParkingSpotWidgetProvider : AppWidgetProvider() {
             views.setViewVisibility(R.id.badgePinIdle, View.GONE)
             views.setTextViewText(R.id.tvWidgetStatus, context.getString(R.string.widget_status_saving))
             views.setTextViewText(R.id.tvWidgetHeaderSub, context.getString(R.string.loading_gps))
+            views.setViewVisibility(R.id.layoutWidgetBrowsePager, View.GONE)
             views.setViewVisibility(R.id.btnWidgetBookmark, View.GONE)
-            views.setViewVisibility(R.id.btnWidgetClear, View.GONE)
 
             views.setTextViewText(R.id.tvWidgetTitle, context.getString(R.string.widget_saving_title))
             views.setTextViewText(R.id.tvWidgetSubtitle, context.getString(R.string.widget_saving_subtitle))
@@ -945,21 +1026,40 @@ class ParkingSpotWidgetProvider : AppWidgetProvider() {
         private fun bindEmptyState(
             context: Context,
             views: RemoteViews,
+            appWidgetId: Int,
             minHeightDp: Int,
+            isTiny: Boolean,
+            browseState: ParkingStorage.WidgetBrowseState,
             saveSpotBroadcast: PendingIntent,
             qrPending: PendingIntent
         ) {
+            val isSavedMode = browseState.browseMode == ParkingStorage.WIDGET_BROWSE_MODE_SAVED
             views.setViewVisibility(R.id.widgetExpandedMapContainer, View.GONE)
             views.setViewVisibility(R.id.widgetNormalMiddle, View.VISIBLE)
             views.setViewVisibility(R.id.badgePinActive, View.GONE)
             views.setViewVisibility(R.id.badgePinIdle, View.VISIBLE)
-            views.setTextViewText(R.id.tvWidgetStatus, context.getString(R.string.widget_status_ready))
+            views.setTextViewText(
+                R.id.tvWidgetStatus,
+                context.getString(
+                    if (isSavedMode) R.string.widget_status_saved else R.string.widget_status_history
+                )
+            )
             views.setTextViewText(R.id.tvWidgetHeaderSub, context.getString(R.string.widget_header_idle_sub))
+            bindBrowsePager(context, views, appWidgetId, browseState, isTiny)
             views.setViewVisibility(R.id.btnWidgetBookmark, View.GONE)
-            views.setViewVisibility(R.id.btnWidgetClear, View.GONE)
 
-            views.setTextViewText(R.id.tvWidgetTitle, context.getString(R.string.widget_no_spot_title))
-            views.setTextViewText(R.id.tvWidgetSubtitle, context.getString(R.string.widget_no_spot_subtitle))
+            views.setTextViewText(
+                R.id.tvWidgetTitle,
+                context.getString(
+                    if (isSavedMode) R.string.widget_no_saved_title else R.string.widget_no_spot_title
+                )
+            )
+            views.setTextViewText(
+                R.id.tvWidgetSubtitle,
+                context.getString(
+                    if (isSavedMode) R.string.widget_no_saved_subtitle else R.string.widget_no_spot_subtitle
+                )
+            )
             views.setViewVisibility(
                 R.id.tvWidgetSubtitle,
                 if (minHeightDp in 1..84) View.GONE else View.VISIBLE
@@ -978,6 +1078,7 @@ class ParkingSpotWidgetProvider : AppWidgetProvider() {
         private fun bindActiveSpotState(
             context: Context,
             storage: ParkingStorage,
+            browseState: ParkingStorage.WidgetBrowseState,
             record: ParkingRecord,
             views: RemoteViews,
             appWidgetId: Int,
@@ -992,7 +1093,28 @@ class ParkingSpotWidgetProvider : AppWidgetProvider() {
         ) {
             views.setViewVisibility(R.id.badgePinActive, View.VISIBLE)
             views.setViewVisibility(R.id.badgePinIdle, View.GONE)
-            views.setTextViewText(R.id.tvWidgetStatus, context.getString(R.string.widget_status_active))
+
+            val isSavedMode = browseState.browseMode == ParkingStorage.WIDGET_BROWSE_MODE_SAVED
+            val displayNumber = if (browseState.totalCount > 1) {
+                (browseState.totalCount - browseState.currentIndex).coerceIn(1, browseState.totalCount)
+            } else {
+                1
+            }
+            val statusText = when {
+                isSavedMode && browseState.totalCount > 1 -> context.getString(
+                    R.string.widget_status_saved_paged,
+                    displayNumber,
+                    browseState.totalCount
+                )
+                isSavedMode -> context.getString(R.string.widget_status_saved)
+                browseState.totalCount > 1 -> context.getString(
+                    R.string.widget_status_history_paged,
+                    displayNumber,
+                    browseState.totalCount
+                )
+                else -> context.getString(R.string.widget_status_history)
+            }
+            views.setTextViewText(R.id.tvWidgetStatus, statusText)
 
             val cachedDistance = storage.getWidgetDistanceText(record.id)
             if (isTiny && !cachedDistance.isNullOrBlank()) {
@@ -1005,6 +1127,8 @@ class ParkingSpotWidgetProvider : AppWidgetProvider() {
                 views.setTextViewText(R.id.tvWidgetHeaderSub, context.getString(R.string.saved_spot_badge))
             }
 
+            bindBrowsePager(context, views, appWidgetId, browseState, isTiny)
+
             views.setViewVisibility(R.id.btnWidgetBookmark, View.VISIBLE)
             views.setImageViewResource(
                 R.id.ivWidgetBookmark,
@@ -1013,12 +1137,6 @@ class ParkingSpotWidgetProvider : AppWidgetProvider() {
             views.setOnClickPendingIntent(
                 R.id.btnWidgetBookmark,
                 buildBroadcastPendingIntent(context, appWidgetId * 20 + 5, ACTION_TOGGLE_BOOKMARK)
-            )
-
-            views.setViewVisibility(R.id.btnWidgetClear, View.VISIBLE)
-            views.setOnClickPendingIntent(
-                R.id.btnWidgetClear,
-                buildBroadcastPendingIntent(context, appWidgetId * 20 + 6, ACTION_CLEAR_SPOT)
             )
 
             if (isMapExpanded) {
@@ -1085,6 +1203,54 @@ class ParkingSpotWidgetProvider : AppWidgetProvider() {
             )
         }
 
+        private fun bindBrowsePager(
+            context: Context,
+            views: RemoteViews,
+            appWidgetId: Int,
+            browseState: ParkingStorage.WidgetBrowseState,
+            isTiny: Boolean
+        ) {
+            if (isTiny || (!browseState.canGoPrevious && !browseState.canGoNext)) {
+                views.setViewVisibility(R.id.layoutWidgetBrowsePager, View.GONE)
+                return
+            }
+
+            views.setViewVisibility(R.id.layoutWidgetBrowsePager, View.VISIBLE)
+            views.setBoolean(R.id.btnWidgetPrevSpot, "setEnabled", browseState.canGoPrevious)
+            views.setInt(
+                R.id.ivWidgetPrevSpot,
+                "setImageAlpha",
+                if (browseState.canGoPrevious) 255 else 75
+            )
+            if (browseState.canGoPrevious) {
+                views.setOnClickPendingIntent(
+                    R.id.btnWidgetPrevSpot,
+                    buildBroadcastPendingIntent(
+                        context,
+                        appWidgetId * 20 + 16,
+                        ACTION_WIDGET_PREV_SPOT
+                    )
+                )
+            }
+
+            views.setBoolean(R.id.btnWidgetNextSpot, "setEnabled", browseState.canGoNext)
+            views.setInt(
+                R.id.ivWidgetNextSpot,
+                "setImageAlpha",
+                if (browseState.canGoNext) 255 else 75
+            )
+            if (browseState.canGoNext) {
+                views.setOnClickPendingIntent(
+                    R.id.btnWidgetNextSpot,
+                    buildBroadcastPendingIntent(
+                        context,
+                        appWidgetId * 20 + 17,
+                        ACTION_WIDGET_NEXT_SPOT
+                    )
+                )
+            }
+        }
+
         private fun seedUserLocationQuietlyIfMissing(
             appCtx: Context,
             storage: ParkingStorage,
@@ -1097,7 +1263,7 @@ class ParkingSpotWidgetProvider : AppWidgetProvider() {
             }
             val locationManager = ParkingLocationManager(appCtx)
             if (!locationManager.hasLocationPermission()) return null
-            val cached = locationManager.getLastKnownLocationSync() ?: return null
+            val cached = locationManager.getFreshLastKnownLocationSync() ?: return null
             if (!DistanceCalculator.isValidCoordinate(cached.latitude, cached.longitude)) return null
             val (formatted, isRoadRoute) = computeWidgetDistanceDisplay(
                 appCtx = appCtx,
@@ -1114,6 +1280,7 @@ class ParkingSpotWidgetProvider : AppWidgetProvider() {
                 cached.longitude,
                 storage.isWidgetMapCenteredOnUser()
             )
+            storage.setWidgetMapUserFixMetaQuiet(cached.accuracy, cached.time)
             return cached.latitude to cached.longitude
         }
 
@@ -1232,20 +1399,24 @@ class ParkingSpotWidgetProvider : AppWidgetProvider() {
                     views.setTextViewText(R.id.tvWidgetDistanceActionHint, context.getString(R.string.refresh_distance))
                 }
 
-                if (WidgetMapRenderer.getCachedBitmap(context, miniReq) == null) {
-                    WidgetMapRenderer.renderMapAsync(context, miniReq) {
-                        val freshStorage = ParkingStorage(context)
-                        val freshRecord = freshStorage.getActiveRecord()
+                if (WidgetMapRenderer.shouldRenderMap(context, miniReq)) {
+                    val appCtx = context.applicationContext
+                    WidgetMapRenderer.renderMapAsync(appCtx, miniReq) {
+                        if (WidgetMapRenderer.getCachedBitmap(appCtx, miniReq) == null) {
+                            return@renderMapAsync
+                        }
+                        val freshStorage = ParkingStorage(appCtx)
+                        val freshRecord = freshStorage.getWidgetDisplayedRecord()
                         if (freshRecord != null && DistanceCalculator.isValidCoordinate(miniReq.userLat, miniReq.userLng)) {
                             syncWidgetDistanceFromMemory(
-                                context,
+                                appCtx,
                                 freshStorage,
                                 freshRecord,
                                 miniReq.userLat,
                                 miniReq.userLng
                             )
                         }
-                        updateAllWidgets(context, isSaving = false, isMeasuringDistance = false)
+                        updateAllWidgets(appCtx, isSaving = false, isMeasuringDistance = false)
                     }
                 }
                 views.setOnClickPendingIntent(
